@@ -38,9 +38,13 @@ export interface AppInfo {
 /** A call to the Parasync web API (the same /api routes the web app uses). The signed-in person's access token goes in `token`. */
 export interface ApiRequest {
   path: string; // must start with /api/
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   query?: Record<string, string | number>;
   body?: unknown;
+  /** Files sent as a multipart form (an upload). `data` is the file's bytes. */
+  files?: { field: string; name: string; type: string; data: ArrayBuffer }[];
+  /** Plain text fields sent alongside `files`. */
+  fields?: Record<string, string>;
   token: string;
 }
 

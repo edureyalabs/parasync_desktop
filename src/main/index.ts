@@ -1,14 +1,19 @@
 // src/main/index.ts
-import { app, BrowserWindow, ipcMain, Menu, session, shell, type IpcMainInvokeEvent } from 'electron';
-import { join } from 'node:path';
+import { app, BrowserWindow, ipcMain, Menu, net, protocol, session, shell, type IpcMainInvokeEvent } from 'electron';
+import { join, normalize, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { APP_CONFIG } from '../shared/config';
 import { IPC, type AppInfo } from '../shared/ipc';
 import { encryptionAvailable, getItem, removeItem, setItem } from './secureStore';
 import { checkNow, getStatus, installNow, startUpdater } from './updater';
-import { apiRequest, downloadToDisk } from './webApi';
+import { apiRequest, downloadToDisk, openApiRedirect } from './webApi';
 
 const APP_ID = 'in.parasync.desktop';
+// The built app is served from its own address (app://renderer/...) instead of file://, so the web screens' root-relative
+// addresses such as "/logo.png" resolve, and the page gets a proper secure origin of its own.
+const APP_ORIGIN = 'app://renderer';
+protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 const DEV_URL = process.env['ELECTRON_RENDERER_URL'];
 
 let mainWindow: BrowserWindow | null = null;
@@ -32,7 +37,7 @@ function safeExternal(raw: unknown): URL | null {
 function trusted(event: IpcMainInvokeEvent): boolean {
   const url = event.senderFrame?.url ?? '';
   if (DEV_URL && url.startsWith(DEV_URL)) return true;
-  return url.startsWith('file://') && event.sender === mainWindow?.webContents;
+  return url.startsWith(`${APP_ORIGIN}/`) && event.sender === mainWindow?.webContents;
 }
 
 function handle<T>(channel: string, fn: (event: IpcMainInvokeEvent, ...args: unknown[]) => T | Promise<T>): void {
@@ -102,15 +107,21 @@ function createWindow(): void {
 
   // The app is one page. If anything tries to navigate away, send it to the browser instead.
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    const inApp = (DEV_URL && url.startsWith(DEV_URL)) || url.startsWith('file://');
+    const inApp = (DEV_URL && url.startsWith(DEV_URL)) || url === `${APP_ORIGIN}/index.html`;
     if (inApp) return;
-    event.preventDefault();
-    const safe = safeExternal(url);
-    if (safe) void shell.openExternal(safe.toString());
+    event.preventDefault(); // anything else (an address inside the app that is not the app itself, or another site) never replaces the window
+    if (url.startsWith(`${APP_ORIGIN}/api/`)) {
+      // The web's code starts some sign-ins with a page navigation to its own /api/ address: finish that in the person's browser.
+      const parsed = new URL(url);
+      void openApiRedirect(`${parsed.pathname}${parsed.search}`);
+    } else if (!url.startsWith(`${APP_ORIGIN}/`)) {
+      const safe = safeExternal(url);
+      if (safe) void shell.openExternal(safe.toString());
+    }
   });
 
   if (DEV_URL) void mainWindow.loadURL(DEV_URL);
-  else void mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
+  else void mainWindow.loadURL(`${APP_ORIGIN}/index.html`);
 }
 
 // ── one instance, and the parasync:// link ──────────────────────────────────
@@ -144,6 +155,22 @@ if (!app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(() => {
     app.setAppUserModelId(APP_ID);
+
+    // A file the page saves (for example an attachment): the system's Save dialog, then show it in its folder.
+    session.defaultSession.on('will-download', (_event, item) => {
+      item.once('done', (_e, state) => {
+        if (state === 'completed') shell.showItemInFolder(item.getSavePath());
+      });
+    });
+
+    // Serve the built app's files, and nothing outside its folder.
+    const rendererRoot = join(__dirname, '../renderer');
+    protocol.handle('app', (request) => {
+      const requested = decodeURIComponent(new URL(request.url).pathname);
+      const file = normalize(join(rendererRoot, requested === '/' ? 'index.html' : requested));
+      if (file !== rendererRoot && !file.startsWith(rendererRoot + sep)) return new Response('Not found', { status: 404 });
+      return net.fetch(pathToFileURL(file).toString());
+    });
     Menu.setApplicationMenu(null);
 
     // The page may use nothing from the machine (camera, microphone, location, ...).

@@ -11,19 +11,22 @@ Electron + React + TypeScript app for Windows. Read README.md first (structure, 
 - The renderer never gets Node. New capabilities go through `src/shared/ipc.ts` (contract), `src/preload/index.ts`
   (bridge) and `src/main/index.ts` (handler with `handle()`, which verifies the caller). Validate every argument in main.
 - Agent output is untrusted text: render it through `components/Markdown.tsx`, never as HTML.
-- Match the web app: "Stone & Brass" tokens in `src/renderer/src/lib/theme.ts`, fonts Newsreader / Inter / IBM Plex Mono.
+- Do not restyle web screens here; they must stay identical to the web. Fonts (Newsreader, Inter, IBM Plex Mono) are bundled.
 - Use `async/await`, no `.then()` chains for new code.
 - Run `npm run typecheck` and `npm run build` before saying a task is done.
 - Ask before adding a dependency.
 
+## The web screens
+`src/renderer/src/web/` is a copy of the web repo's `(shell)` screens and what they import, made by `npm run sync-web -- <path to
+parasync_frontmain>`. **Never edit it by hand**; the next sync overwrites it. Differences from the web go in `src/renderer/src/shims/`
+(adapters for Next.js links/routing/images, the Supabase client, `/api` calls, payments, the code editor). Desktop-only code imports as
+`~/...`; the web copy imports as `@/...`. After a sync run `npm run typecheck` (it checks the copy too) and `npm run build`.
+
 ## Data
-All data goes through the Supabase client in `src/renderer/src/lib/supabase.ts` under row-level security, mirroring
-the web app (`parasync_frontmain`) and phone app (`parasync_mobile`). Table and RPC names must match those apps.
-Do not add direct calls to bemain from the app. Things that need the web's server (file downloads, the connected-users list,
-catalogs) go through `window.parasync.api` / `download` (`src/renderer/src/lib/api.ts` → `src/main/webApi.ts`), which sends the
-person's token as `Authorization: Bearer` to our own `/api/` routes. Never select secret values, tokens or credential columns:
-list names and flags only (see the comments in `views/agent/SecretsTab.tsx`, `McpTab.tsx`, `SignedApisTab.tsx`).
-Agent settings screens are read-only until their editing is built; each ends with a `WebNote` pointing at the web page.
+Screens read and write Supabase under row-level security, through the single client in `src/renderer/src/lib/supabase.ts`. Things that
+need the web's server go through `fetch('/api/...')`, which `shims/apiBridge.ts` sends via the main process (`src/main/webApi.ts`) with the
+person's token as `Authorization: Bearer`. Do not add direct calls to bemain from the app. Never request secret values, tokens or
+credential columns.
 
 ## Releasing
 `npm run release:patch` (or `release:minor`) then `git push origin main --follow-tags`. See README.

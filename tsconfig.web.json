@@ -14,7 +14,18 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
-    "paths": { "@/*": ["./src/renderer/src/*"], "@shared/*": ["./src/shared/*"] }
+    "paths": {
+      "next/link": ["./src/renderer/src/shims/nextLink.tsx"],
+      "next/navigation": ["./src/renderer/src/shims/nextNavigation.tsx"],
+      "next/image": ["./src/renderer/src/shims/nextImage.tsx"],
+      "@/lib/supabase/client": ["./src/renderer/src/shims/supabaseClient.ts"],
+      "@uiw/react-codemirror": ["./src/renderer/src/shims/codemirror.tsx"],
+      "@codemirror/lang-python": ["./src/renderer/src/shims/langPython.ts"],
+      "~/*": ["./src/renderer/src/*"],
+      "@/*": ["./src/renderer/src/web/*"],
+      "@shared/*": ["./src/shared/*"]
+    }
   },
-  "include": ["src/renderer/src/**/*", "src/shared/**/*"]
+  "include": ["src/renderer/src/**/*", "src/shared/**/*"],
+  "exclude": ["src/renderer/src/web/**/*"]
 }

@@ -56,3 +56,23 @@ input, textarea { font-family: inherit; }
 .ps-md th, .ps-md td { text-align: left; padding: 0.45em 0.7em; border-bottom: 1px solid #ece9de; vertical-align: top; }
 .ps-md th { background: #f7f6f2; font-weight: 600; white-space: nowrap; }
 .ps-md tr:last-child td { border-bottom: 0; }
+
+/* The web app names its fonts "Inter", "Newsreader" and "IBM Plex Mono". Inter is bundled here as a variable font under another
+   name, so give it the web's name; the other two are bundled under the same names already. */
+@font-face {
+  font-family: 'Inter';
+  src: url('../../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('../../../node_modules/@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }

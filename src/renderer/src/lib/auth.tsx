@@ -4,8 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 import { APP_CONFIG } from '@shared/config';
 
-import { clearLocalData } from '@/lib/readState';
-import { friendlyError, supabase } from '@/lib/supabase';
+import { clearLocalData } from '~/lib/readState';
+import { friendlyError, supabase } from '~/lib/supabase';
 
 interface AuthCtx {
   session: Session | null;

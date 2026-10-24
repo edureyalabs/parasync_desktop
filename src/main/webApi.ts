@@ -15,7 +15,12 @@ const TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 const MAX_JSON_BYTES = 5 * 1024 * 1024;
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const TOKEN_SHAPE = /^[A-Za-z0-9._-]{20,4096}$/;
+
+// The most recent login token the page used for a web-API call. Needed only to follow a "continue in your browser" redirect that
+// the web's own code starts with a plain page navigation (see openApiRedirect), which carries no token of its own.
+let lastToken: string | null = null;
 
 // Only an unpackaged (development) run may point at a different site, for testing against a local fake; the installed app always uses ours.
 const origin = new URL(!app.isPackaged && process.env['PARASYNC_WEB_URL'] ? process.env['PARASYNC_WEB_URL'] : APP_CONFIG.webUrl).origin;
@@ -33,6 +38,7 @@ function buildUrl(path: unknown, query: ApiRequest['query']): URL {
 
 function checkToken(token: unknown): string {
   if (typeof token !== 'string' || !TOKEN_SHAPE.test(token)) throw new Error('not signed in');
+  lastToken = token;
   return token;
 }
 
@@ -58,7 +64,21 @@ export async function apiRequest(raw: unknown): Promise<ApiResponse> {
   const req = (raw ?? {}) as Partial<ApiRequest>;
   const url = buildUrl(req.path, req.query);
   const token = checkToken(req.token);
-  const method = req.method === 'POST' ? 'POST' : 'GET';
+  const method = req.method && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) ? req.method : 'GET';
+  const hasBody = method !== 'GET' && method !== 'DELETE';
+  const files = Array.isArray(req.files) ? req.files : [];
+  let form: FormData | null = null;
+  if (files.length > 0) {
+    let total = 0;
+    form = new FormData();
+    for (const [k, v] of Object.entries(req.fields ?? {})) if (typeof v === 'string') form.append(k, v);
+    for (const f of files) {
+      if (typeof f.field !== 'string' || typeof f.name !== 'string' || !(f.data instanceof ArrayBuffer)) return { ok: false, status: 400, data: { error: 'Invalid file.' } };
+      total += f.data.byteLength;
+      if (total > MAX_UPLOAD_BYTES) return { ok: false, status: 413, data: { error: 'This file is too large to upload here.' } };
+      form.append(f.field, new Blob([f.data], { type: typeof f.type === 'string' ? f.type : 'application/octet-stream' }), safeName(f.name));
+    }
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -68,9 +88,10 @@ export async function apiRequest(raw: unknown): Promise<ApiResponse> {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
-        ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
+        // A multipart body sets its own Content-Type (with its boundary), so it must not be set here.
+        ...(hasBody && !form ? { 'Content-Type': 'application/json' } : {}),
       },
-      body: method === 'POST' ? JSON.stringify(req.body ?? {}) : undefined,
+      body: form ?? (hasBody ? JSON.stringify(req.body ?? {}) : undefined),
       redirect: 'error', // an API route never needs to redirect; refusing keeps the token on our own site
       signal: controller.signal,
     });
@@ -96,6 +117,30 @@ function fileLink(raw: unknown): URL | null {
     return (link.protocol === 'https:' && link.hostname === supabaseHost) || devOk ? link : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * The web's own code starts some sign-ins (MCP servers, connectors) by navigating the page to one of its /api/ addresses, which
+ * answers with a redirect to the provider. A desktop window cannot follow that with the person's login, so the app asks the
+ * address itself (with the token), takes the provider address from the redirect and opens that in the person's browser.
+ */
+export async function openApiRedirect(pathAndQuery: string): Promise<void> {
+  if (!lastToken) return;
+  const url = buildUrl(pathAndQuery.split('?')[0], Object.fromEntries(new URLSearchParams(pathAndQuery.split('?')[1] ?? '')));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${lastToken}` }, redirect: 'manual', signal: controller.signal });
+    const location = res.headers.get('location');
+    if (res.status >= 300 && res.status < 400 && location) {
+      const target = new URL(location, origin);
+      if (target.protocol === 'https:' || target.origin === origin) await shell.openExternal(target.toString());
+    }
+  } catch {
+    /* the person simply stays where they are */
+  } finally {
+    clearTimeout(timer);
   }
 }
 

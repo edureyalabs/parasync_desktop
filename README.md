@@ -8,20 +8,52 @@ the cloud.
 
 Later phases move parts of the runtime onto the PC (tool execution first). See "Roadmap".
 
+## How the screens are made
+
+The desktop app **runs the web app's own screens**. It does not imitate them. `src/renderer/src/web/` holds a copy of the web
+repo's `app/(shell)` pages and layouts plus every component, helper and icon they import (about 180 files), copied as they are.
+Because they are the same code, they look and behave like the web, and a screen the web adds shows up here after a sync.
+
+Next.js itself is not used. The few places the web code leans on it are answered by small adapters in `src/renderer/src/shims/`:
+
+| The web code uses | The desktop does |
+|---|---|
+| `next/link`, `next/navigation` (`useRouter`, `usePathname`, `useParams`, `redirect`) | `shims/nextLink.tsx`, `shims/nextNavigation.tsx`, and `router/` which builds the screens from the same folder layout (`routes.ts`) and nests the web's layouts |
+| `next/image` | `shims/nextImage.tsx` (a plain image) |
+| the web's Supabase client | `shims/supabaseClient.ts` (the app's one client) |
+| `fetch('/api/...')` with a browser cookie | `shims/apiBridge.ts` sends it through the main process (`src/main/webApi.ts`) to the real site with the person's login token, including file uploads |
+| a page navigation to an `/api/...` sign-in address | the main process asks that address and opens the provider's page in the browser |
+| card payment pop-ups | `shims/webOnlyModal.tsx`: "Continue on the web" (payments are made on the web only) |
+| the Tool Builder's code editor package | `shims/codemirror.tsx`: a plain text box for now (see Known gaps) |
+
+Desktop-only code (sign-in, the About page, update notice, reply notifications) lives outside `web/` and imports as `~/...`;
+the web copy imports as `@/...`.
+
+### Keeping up with the web
+When the web's screens change, bring the changes over:
+
+```bash
+npm run sync-web -- ../parasync_frontmain   # path to your frontmain checkout; copies only what the screens need
+npm run typecheck                           # also checks the copied files; a web change that needs an adapter shows up here
+npm run build
+git diff --stat                             # review what changed, then commit and release
+```
+
+Never edit files under `src/renderer/src/web/`: the next sync overwrites them. If something needs to differ on desktop, change an
+adapter in `shims/` (or tell the web repo to change).
+
 ## What is in this version
 
-| Area | Status |
-|---|---|
-| Sign in (email and password, Google) | Done |
-| My Agents list, unread dots, live updates, Windows notifications for replies | Done |
-| Chat: history, live replies, markdown and tables, "thinking / using a tool" status, task/shift/project counts | Done |
-| Notification feed per agent (task, shift, project results) | Done |
-| Discover (public agents), Invitations (accept with a code, decline) | Done |
-| **Agent settings** (click the agent's name in a chat): Runsheet (tasks, shifts, projects), Platform Tools, Emails, WhatsApp status, Tool Builder, Instructions, Secrets (names only), Database Integrations, MCP, Browser Access, Add Users, Workspace (browse and save files), Agent Profile. A connected person gets the smaller set the web gives them (Runsheet, Tools, Instructions, My Keys, Database Integrations, Workspace, Agent Profile) | Done, read-only |
-| **Account** like the web: Organizations, Billing (wallet, top-ups, invoices), Usage (charts by day, agent, kind of work), Profile (name editable), This app (version, updates, sign out) | Done |
-| Automatic updates | Done (installed app only) |
-| Changing things: tool and instruction switches, secrets and keys, invites, top-ups, the guided Tool Builder, Browser Access setup, WhatsApp linking, runsheet step detail | Each screen has an "Open in the web app" button for now |
-| Local tool execution, local bemain | Not yet (see Roadmap) |
+Everything the web app's signed-in area has: My Agents and chat (attachments, uploads, notifications feed), the agent settings tabs
+(Runsheet, Platform Tools, Emails, WhatsApp, Tool Builder, Instructions, Secrets, Database Integrations, MCP, Browser Access, Add
+Users, Workspace, Agent Profile), Account (Organizations, Billing, Usage, Profile), Marketplace and Requests. Plus, desktop only:
+Windows notifications for replies, automatic updates, and an About page (click the version at the foot of the left strip).
+
+### Known gaps
+- **Payments are on the web.** Adding funds and paying for a plan open the web app.
+- **Tool Builder code editor** is a plain text box until the editor package (`@uiw/react-codemirror`, `@codemirror/lang-python`) is added to this app.
+- **Signing in to an MCP server** finishes in your browser; come back to the app and refresh the list.
+- Local tool execution and local bemain are not built yet (see Roadmap).
 
 ## Develop
 
@@ -62,9 +94,10 @@ Security choices, so they are not undone by accident:
   default browser and only for http(s) and mailto.
 - Anything navigating away from the app, or opening a new window, is sent to the browser instead.
 - No camera, microphone, location or other device permission is ever granted.
-- The web API (`/api/...`, for example file downloads and the connected-users list) is called from the main process, never the
-  page, with the person's own login token in an `Authorization: Bearer` header (`src/main/webApi.ts`). Only our own site, only
-  `/api/` paths, GET and POST, with time and size limits. The web side accepts that token in `createSupabaseRequestClient`.
+- The web API (`/api/...`) is called from the main process, never the page, with the person's own login token in an
+  `Authorization: Bearer` header (`src/main/webApi.ts`). Only our own site, only `/api/` paths, with time and size limits. The web
+  side accepts that token in `createSupabaseRequestClient`.
+- The built app is served from its own `app://renderer` address; navigation anywhere else is blocked or sent to the browser.
 
 ## Release and upgrade (how a new version reaches everyone)
 

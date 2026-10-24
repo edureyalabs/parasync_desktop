@@ -3,10 +3,12 @@ import { useState, type FormEvent } from 'react';
 
 import { APP_CONFIG } from '@shared/config';
 
-import { Button, ErrorText, Spinner } from '@/components/ui';
-import { useAuth } from '@/lib/auth';
-import { C, MONO, SERIF } from '@/lib/theme';
-import logo from '@/assets/logo.png';
+import { Button, ErrorText, Spinner } from '~/components/ui';
+import { useAuth } from '~/lib/auth';
+const C = { bg: '#F7F6F2', ink: '#26251E', soft: '#9E9C8F', text: '#3A3830', muted: '#67655A', line: '#E2DFD3', lineStrong: '#DAD5C5', faint: '#C9C4B2', brass: '#A17F3A', brassDeep: '#514726' } as const;
+const MONO = "'IBM Plex Mono', Consolas, monospace";
+const SERIF = "'Newsreader', Georgia, serif";
+import logo from '~/assets/logo.png';
 
 function GoogleMark() {
   return (

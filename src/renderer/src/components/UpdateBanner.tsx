@@ -1,8 +1,7 @@
 // src/renderer/src/components/UpdateBanner.tsx
-import { useUpdates } from '@/hooks/useUpdates';
-import { C } from '@/lib/theme';
+import { useUpdates } from '~/hooks/useUpdates';
 
-/** A slim bar at the top while an update downloads, and a "Restart to update" button once it is ready. */
+/** A small notice in the corner while an update downloads, with "Restart to update" once it is ready. It floats, so it never moves the web's layout. */
 export function UpdateBanner() {
   const { status, install } = useUpdates();
   if (status.state !== 'downloading' && status.state !== 'ready' && status.state !== 'available') return null;
@@ -13,10 +12,10 @@ export function UpdateBanner() {
     : `Update ${status.version} found, downloading…`;
 
   return (
-    <div role="status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '6px 14px', background: C.brassBg, borderBottom: `1px solid ${C.brassLine}`, fontSize: 12.5, color: C.brassDeep, flexShrink: 0 }}>
+    <div role="status" style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 1000, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: '#EFE4C9', border: '1px solid #E4D2A0', borderRadius: 10, boxShadow: '0 6px 20px rgba(38,37,30,0.18)', fontSize: 12.5, color: '#514726', fontFamily: "'Inter', sans-serif" }}>
       <span>{text}</span>
       {status.state === 'ready' && (
-        <button onClick={install} style={{ border: 'none', background: C.ink, color: C.bg, borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
+        <button onClick={install} style={{ border: 'none', background: '#26251E', color: '#F7F6F2', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
           Restart to update
         </button>
       )}
