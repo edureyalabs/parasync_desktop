@@ -16,7 +16,7 @@ export const APP_CONFIG = {
    * app and says "you can close this tab". Switch to 'web-bridge' ONLY after https://parasync.in/auth/desktop (and the www
    * address) are listed under Supabase > Authentication > URL Configuration > Redirect URLs, or Google sign-in will not return to the app.
    */
-  googleReturn: 'deep-link' as 'deep-link' | 'web-bridge',
+  googleReturn: 'web-bridge' as 'deep-link' | 'web-bridge',
   bridgePath: '/auth/desktop',
   /** Hosts the app may open in the system browser for sign-in (Supabase's own host and Google). */
   oauthHosts: ['eyufwzhxxfebncwaxgci.supabase.co', 'accounts.google.com'],
