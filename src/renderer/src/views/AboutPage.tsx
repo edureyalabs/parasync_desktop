@@ -3,6 +3,7 @@
 import { useState } from 'react';
 
 import { Button } from '~/components/ui';
+import { LocalExecutionCard } from '~/components/LocalExecutionCard';
 import { useUpdates } from '~/hooks/useUpdates';
 import { useAuth } from '~/lib/auth';
 import { useRouter } from '~/shims/nextNavigation';
@@ -41,6 +42,7 @@ export function AboutPage() {
             : <Button variant="secondary" label="Check for updates" onClick={check} loading={status.state === 'checking'} disabled={status.state === 'downloading'} />}
           <Button variant="secondary" label="Sign out" loading={signingOut} onClick={() => { setSigningOut(true); void signOut(); }} />
         </div>
+        <LocalExecutionCard />
       </div>
     </div>
   );

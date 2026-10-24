@@ -2,6 +2,8 @@
 // The one contract between the locked-down page (renderer) and the main process. Every channel is listed here,
 // and the preload exposes nothing else.
 
+import type { RunnerStatus } from './runner';
+
 export const IPC = {
   storageGet: 'storage:get',
   storageSet: 'storage:set',
@@ -17,6 +19,11 @@ export const IPC = {
   appInfo: 'app:info',
   apiRequest: 'api:request',
   apiDownload: 'api:download',
+  runnerGet: 'runner:get',
+  runnerSetEnabled: 'runner:set-enabled',
+  runnerInstall: 'runner:install',
+  runnerSession: 'runner:session',
+  runnerStatus: 'runner:status',
 } as const;
 
 export type UpdateStatus =
@@ -72,6 +79,15 @@ export interface DesktopApi {
   openOAuth(url: string): Promise<void>;
   /** Fires with the parasync://auth/callback URL when the browser hands the sign-in back. */
   onAuthCallback(cb: (url: string) => void): () => void;
+  /** Running agents' tool code on this PC (Windows only). The work itself happens in the main process. */
+  runner: {
+    get(): Promise<RunnerStatus>;
+    setEnabled(enabled: boolean): Promise<void>;
+    install(): Promise<void>;
+    /** Tells the main process who is signed in (null on sign-out) and the current access token, renewed whenever it changes. */
+    setSession(userId: string | null, token: string | null): Promise<void>;
+    onStatus(cb: (status: RunnerStatus) => void): () => void;
+  };
   updates: {
     get(): Promise<UpdateStatus>;
     check(): Promise<void>;

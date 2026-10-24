@@ -30,3 +30,9 @@ credential columns.
 
 ## Releasing
 `npm run release:patch` (or `release:minor`) then `git push origin main --follow-tags`. See README.
+
+## Local execution (src/main/runner/)
+Runs agents' tool code in the app's own WSL2 distro (`ParasyncRunner`, built in the parasync_localrunner repo). Rules: the main process
+never gets service keys (only the person's own token, in memory, RLS-limited); every download is host-allowlisted and sha256-checked before
+`wsl --import`; the executor (`executor.ts`) imports nothing from Electron so it can be tested alone (`npm test`); a device is `ready` only
+while its self-test passes; never loosen who may claim a job (the database function checks the owner). Design and status: docs/HANDOFF.md.

@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { APP_CONFIG } from '../shared/config';
 import { IPC, type AppInfo } from '../shared/ipc';
 import { encryptionAvailable, getItem, removeItem, setItem } from './secureStore';
+import { runnerInstall, runnerSession, runnerSetEnabled, runnerStatus, startRunner } from './runner';
 import { checkNow, getStatus, installNow, startUpdater } from './updater';
 import { apiRequest, downloadToDisk, openApiRedirect } from './webApi';
 
@@ -213,12 +214,18 @@ if (!app.requestSingleInstanceLock()) {
     handle(IPC.apiRequest, (_e, request) => apiRequest(request));
     handle(IPC.apiDownload, (_e, request) => downloadToDisk(request, mainWindow));
 
+    handle(IPC.runnerGet, () => runnerStatus());
+    handle(IPC.runnerSetEnabled, (_e, enabled) => runnerSetEnabled(enabled));
+    handle(IPC.runnerInstall, () => runnerInstall());
+    handle(IPC.runnerSession, (_e, userId, token) => runnerSession(userId, token));
+
     handle(IPC.updateGet, () => getStatus());
     handle(IPC.updateCheck, () => checkNow());
     handle(IPC.updateInstall, () => installNow());
 
     createWindow();
     startUpdater(() => mainWindow);
+    startRunner(() => mainWindow);
 
     // Launched by a parasync:// link on a cold start (Windows passes it as an argument).
     const link = process.argv.find((a) => a.startsWith(`${APP_CONFIG.protocol}://`));

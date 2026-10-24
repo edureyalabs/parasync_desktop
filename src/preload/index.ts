@@ -4,6 +4,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 
 import { IPC, type DesktopApi, type UpdateStatus } from '../shared/ipc';
+import type { RunnerStatus } from '../shared/runner';
 
 function subscribe<T>(channel: string, cb: (value: T) => void): () => void {
   const listener = (_event: IpcRendererEvent, value: T) => cb(value);
@@ -29,6 +30,13 @@ const api: DesktopApi = {
       if (waiting) cb(waiting);
     });
     return off;
+  },
+  runner: {
+    get: () => ipcRenderer.invoke(IPC.runnerGet),
+    setEnabled: (enabled) => ipcRenderer.invoke(IPC.runnerSetEnabled, enabled),
+    install: () => ipcRenderer.invoke(IPC.runnerInstall),
+    setSession: (userId, token) => ipcRenderer.invoke(IPC.runnerSession, userId, token),
+    onStatus: (cb) => subscribe<RunnerStatus>(IPC.runnerStatus, cb),
   },
   updates: {
     get: () => ipcRenderer.invoke(IPC.updateGet),

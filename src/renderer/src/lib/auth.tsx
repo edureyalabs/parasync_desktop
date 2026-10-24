@@ -51,6 +51,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Tell the main process who is signed in (and keep it current as the token renews), so this PC can take tool runs for them.
+  useEffect(() => {
+    void window.parasync.runner.setSession(session?.user.id ?? null, session?.access_token ?? null).catch(() => undefined);
+  }, [session]);
+
   // The system browser hands Google sign-in back as parasync://auth/callback?code=...
   useEffect(() => {
     return window.parasync.onAuthCallback((raw) => {
