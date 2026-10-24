@@ -86,6 +86,19 @@ export async function apiRequest(raw: unknown): Promise<ApiResponse> {
   }
 }
 
+/** The temporary file link from the web route, accepted only if it is https on our own Supabase storage (or, in a development run, the fake site). */
+function fileLink(raw: unknown): URL | null {
+  if (typeof raw !== 'string' || raw.length > 4096) return null;
+  try {
+    const link = new URL(raw);
+    const supabaseHost = new URL(APP_CONFIG.supabaseUrl).hostname;
+    const devOk = !app.isPackaged && link.origin === origin;
+    return (link.protocol === 'https:' && link.hostname === supabaseHost) || devOk ? link : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A file name that is safe to offer in a save dialog: no folders, no characters Windows rejects. */
 function safeName(name: unknown): string {
   const base = basename(typeof name === 'string' ? name : 'download').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').trim();
@@ -106,7 +119,15 @@ export async function downloadToDisk(raw: unknown, window: BrowserWindow | null)
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
     try {
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal: controller.signal });
+      // The web route does not send the file itself: it checks the person may have it and answers with a short-lived link to it.
+      const ask = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, redirect: 'error', signal: controller.signal });
+      if (!ask.ok) return { state: 'failed', message: ask.status === 404 ? 'This file is no longer available.' : 'The file could not be downloaded.' };
+      const answer = JSON.parse(await readCapped(ask, MAX_JSON_BYTES)) as { ok?: boolean; url?: unknown };
+      const fileUrl = fileLink(answer.url);
+      if (!answer.ok || !fileUrl) return { state: 'failed', message: 'This file is no longer available.' };
+
+      // The link already carries its own permission, so no login token is sent to it.
+      const res = await fetch(fileUrl, { redirect: 'error', signal: controller.signal });
       if (!res.ok || !res.body) return { state: 'failed', message: res.status === 404 ? 'This file is no longer available.' : 'The file could not be downloaded.' };
       const declared = Number(res.headers.get('content-length') ?? 0);
       if (declared > MAX_DOWNLOAD_BYTES) return { state: 'failed', message: 'This file is too large to download here.' };
