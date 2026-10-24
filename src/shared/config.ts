@@ -10,6 +10,14 @@ export const APP_CONFIG = {
   /** Deep link the system browser returns to after Google sign-in. Must be an allowed redirect URL in Supabase. */
   protocol: 'parasync',
   authCallback: 'parasync://auth/callback',
+  /**
+   * Where Google sign-in returns to. 'deep-link' goes straight to parasync://auth/callback (works today; the browser shows an
+   * "open app" prompt on a blank page). 'web-bridge' goes through https://parasync.in/auth/desktop, a branded page that opens the
+   * app and says "you can close this tab". Switch to 'web-bridge' ONLY after https://parasync.in/auth/desktop (and the www
+   * address) are listed under Supabase > Authentication > URL Configuration > Redirect URLs, or Google sign-in will not return to the app.
+   */
+  googleReturn: 'deep-link' as 'deep-link' | 'web-bridge',
+  bridgePath: '/auth/desktop',
   /** Hosts the app may open in the system browser for sign-in (Supabase's own host and Google). */
   oauthHosts: ['eyufwzhxxfebncwaxgci.supabase.co', 'accounts.google.com'],
 } as const;
