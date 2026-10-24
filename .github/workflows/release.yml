@@ -15,9 +15,9 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -30,6 +30,22 @@ jobs:
           if [ "$PKG" != "${GITHUB_REF_NAME}" ]; then
             echo "Tag ${GITHUB_REF_NAME} does not match package.json version ${PKG}. Use 'npm version' to bump and tag together."
             exit 1
+          fi
+
+      # "Run workflow" from the Actions page has no tag, and GitHub refuses to publish a release without one.
+      # Create v<version> on this commit if it does not exist yet (a tag push already has it, so this is skipped).
+      - name: Create the version tag if missing
+        if: github.ref_type != 'tag'
+        shell: bash
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists; building and publishing against it."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "${TAG}"
+            git push origin "${TAG}"
           fi
 
       - run: npm ci
