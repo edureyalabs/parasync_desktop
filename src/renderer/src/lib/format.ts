@@ -27,3 +27,19 @@ export function initials(text: string): string {
       .join('') || text.slice(0, 2).toUpperCase()
   );
 }
+
+/** 1,284 / 12.9K / 4.2M */
+export function fmtCompact(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (abs >= 1e4) return `${(n / 1e3).toFixed(1)}K`;
+  return n.toLocaleString('en-US');
+}
+
+export function fmtBytes(n: number | null | undefined): string {
+  if (n === null || n === undefined) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}

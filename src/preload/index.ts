@@ -19,6 +19,8 @@ const api: DesktopApi = {
     remove: (key) => ipcRenderer.invoke(IPC.storageRemove, key),
   },
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
+  api: (request) => ipcRenderer.invoke(IPC.apiRequest, request),
+  download: (request) => ipcRenderer.invoke(IPC.apiDownload, request),
   openOAuth: (url) => ipcRenderer.invoke(IPC.openOAuth, url),
   onAuthCallback: (cb) => {
     const off = subscribe<string>(IPC.authCallback, cb);

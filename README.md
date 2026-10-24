@@ -17,9 +17,10 @@ Later phases move parts of the runtime onto the PC (tool execution first). See "
 | Chat: history, live replies, markdown and tables, "thinking / using a tool" status, task/shift/project counts | Done |
 | Notification feed per agent (task, shift, project results) | Done |
 | Discover (public agents), Invitations (accept with a code, decline) | Done |
-| Account: profile, wallet balance, organizations, version, update check, sign out | Done |
+| **Agent settings** (click the agent's name in a chat): Runsheet (tasks, shifts, projects), Platform Tools, Emails, WhatsApp status, Tool Builder, Instructions, Secrets (names only), Database Integrations, MCP, Browser Access, Add Users, Workspace (browse and save files), Agent Profile. A connected person gets the smaller set the web gives them (Runsheet, Tools, Instructions, My Keys, Database Integrations, Workspace, Agent Profile) | Done, read-only |
+| **Account** like the web: Organizations, Billing (wallet, top-ups, invoices), Usage (charts by day, agent, kind of work), Profile (name editable), This app (version, updates, sign out) | Done |
 | Automatic updates | Done (installed app only) |
-| Agent configuration (tools, instructions, secrets, network...), runsheet, file downloads, billing top-ups | Open in the web app |
+| Changing things: tool and instruction switches, secrets and keys, invites, top-ups, the guided Tool Builder, Browser Access setup, WhatsApp linking, runsheet step detail | Each screen has an "Open in the web app" button for now |
 | Local tool execution, local bemain | Not yet (see Roadmap) |
 
 ## Develop
@@ -61,6 +62,9 @@ Security choices, so they are not undone by accident:
   default browser and only for http(s) and mailto.
 - Anything navigating away from the app, or opening a new window, is sent to the browser instead.
 - No camera, microphone, location or other device permission is ever granted.
+- The web API (`/api/...`, for example file downloads and the connected-users list) is called from the main process, never the
+  page, with the person's own login token in an `Authorization: Bearer` header (`src/main/webApi.ts`). Only our own site, only
+  `/api/` paths, GET and POST, with time and size limits. The web side accepts that token in `createSupabaseRequestClient`.
 
 ## Release and upgrade (how a new version reaches everyone)
 

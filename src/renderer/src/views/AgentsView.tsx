@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth';
 import { listTime, previewText } from '@/lib/chatTime';
 import { useNav } from '@/lib/nav';
 import { C } from '@/lib/theme';
+import { AgentSettings } from '@/views/agent/AgentSettings';
 import { ChatView } from '@/views/ChatView';
 
 function Row({ agent, active, onOpen }: { agent: AgentListItem; active: boolean; onOpen: () => void }) {
@@ -37,7 +38,7 @@ function Row({ agent, active, onOpen }: { agent: AgentListItem; active: boolean;
 
 export function AgentsView() {
   const { session } = useAuth();
-  const { agentId, openAgent } = useNav();
+  const { agentId, agentTab, openAgent } = useNav();
   const { agents, error, reload } = useAgentList(session?.user.id, agentId);
   const [query, setQuery] = useState('');
 
@@ -46,6 +47,9 @@ export function AgentsView() {
     if (!q || !agents) return agents ?? [];
     return agents.filter((a) => a.name.toLowerCase().includes(q) || (a.description ?? '').toLowerCase().includes(q));
   }, [agents, query]);
+
+  // While an agent's settings are open they take over both columns (the tab list on the left, the tab on the right).
+  if (agentId && agentTab) return <AgentSettings key={agentId} agentId={agentId} />;
 
   return (
     <>

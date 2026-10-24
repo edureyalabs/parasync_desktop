@@ -19,7 +19,11 @@ Electron + React + TypeScript app for Windows. Read README.md first (structure, 
 ## Data
 All data goes through the Supabase client in `src/renderer/src/lib/supabase.ts` under row-level security, mirroring
 the web app (`parasync_frontmain`) and phone app (`parasync_mobile`). Table and RPC names must match those apps.
-Do not add direct calls to bemain from the app.
+Do not add direct calls to bemain from the app. Things that need the web's server (file downloads, the connected-users list,
+catalogs) go through `window.parasync.api` / `download` (`src/renderer/src/lib/api.ts` → `src/main/webApi.ts`), which sends the
+person's token as `Authorization: Bearer` to our own `/api/` routes. Never select secret values, tokens or credential columns:
+list names and flags only (see the comments in `views/agent/SecretsTab.tsx`, `McpTab.tsx`, `SignedApisTab.tsx`).
+Agent settings screens are read-only until their editing is built; each ends with a `WebNote` pointing at the web page.
 
 ## Releasing
 `npm run release:patch` (or `release:minor`) then `git push origin main --follow-tags`. See README.

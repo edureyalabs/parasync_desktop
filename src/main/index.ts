@@ -6,6 +6,7 @@ import { APP_CONFIG } from '../shared/config';
 import { IPC, type AppInfo } from '../shared/ipc';
 import { encryptionAvailable, getItem, removeItem, setItem } from './secureStore';
 import { checkNow, getStatus, installNow, startUpdater } from './updater';
+import { apiRequest, downloadToDisk } from './webApi';
 
 const APP_ID = 'in.parasync.desktop';
 const DEV_URL = process.env['ELECTRON_RENDERER_URL'];
@@ -181,6 +182,9 @@ if (!app.requestSingleInstanceLock()) {
       packaged: app.isPackaged,
       secureStorage: encryptionAvailable(),
     }));
+
+    handle(IPC.apiRequest, (_e, request) => apiRequest(request));
+    handle(IPC.apiDownload, (_e, request) => downloadToDisk(request, mainWindow));
 
     handle(IPC.updateGet, () => getStatus());
     handle(IPC.updateCheck, () => checkNow());

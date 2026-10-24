@@ -15,6 +15,8 @@ export const IPC = {
   updateGet: 'update:get',
   updateStatus: 'update:status',
   appInfo: 'app:info',
+  apiRequest: 'api:request',
+  apiDownload: 'api:download',
 } as const;
 
 export type UpdateStatus =
@@ -33,6 +35,22 @@ export interface AppInfo {
   secureStorage: boolean;
 }
 
+/** A call to the Parasync web API (the same /api routes the web app uses). The signed-in person's access token goes in `token`. */
+export interface ApiRequest {
+  path: string; // must start with /api/
+  method?: 'GET' | 'POST';
+  query?: Record<string, string | number>;
+  body?: unknown;
+  token: string;
+}
+
+export type ApiResponse = { ok: boolean; status: number; data: unknown };
+
+export type DownloadResult =
+  | { state: 'saved'; path: string }
+  | { state: 'cancelled' }
+  | { state: 'failed'; message: string };
+
 export interface DesktopApi {
   info(): Promise<AppInfo>;
   storage: {
@@ -42,6 +60,10 @@ export interface DesktopApi {
   };
   /** http(s) and mailto only. */
   openExternal(url: string): Promise<void>;
+  /** Calls a Parasync web API route from the main process (no browser cookies, no CORS). Never throws on HTTP errors; check `ok`. */
+  api(request: ApiRequest): Promise<ApiResponse>;
+  /** Downloads a file from a web API route and asks where to save it. */
+  download(request: { path: string; query?: Record<string, string | number>; token: string; suggestedName: string }): Promise<DownloadResult>;
   /** Opens the sign-in page of an allowed provider in the system browser. */
   openOAuth(url: string): Promise<void>;
   /** Fires with the parasync://auth/callback URL when the browser hands the sign-in back. */

@@ -12,6 +12,7 @@ import { useNotifications } from '@/hooks/useNotifications';
 import { useWorkCounts, type Count } from '@/hooks/useWorkCounts';
 import { useAuth } from '@/lib/auth';
 import { dayKey, dayLabel } from '@/lib/chatTime';
+import { useNav } from '@/lib/nav';
 import { markRead } from '@/lib/readState';
 import { supabase, topic } from '@/lib/supabase';
 import { C, MONO } from '@/lib/theme';
@@ -55,6 +56,7 @@ function CountPill({ label, count }: { label: string; count: Count }) {
 /** One chat with one agent. Mount it with `key={agentId}` so switching agents starts clean. */
 export function ChatView({ agentId }: { agentId: string }) {
   const { session } = useAuth();
+  const { openAgentTab } = useNav();
   const userId = session?.user.id;
 
   const [agent, setAgent] = useState<AgentInfo | null>(null);
@@ -272,16 +274,22 @@ export function ChatView({ agentId }: { agentId: string }) {
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', background: C.chatBg }}>
       <header style={{ height: 64, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px 0 20px', background: C.ink, color: C.bg }}>
-        {agent && (
-          <span style={{ position: 'relative', display: 'inline-flex' }}>
-            <Avatar name={agent.name} url={agent.avatar_url} size={40} ring ringGap={C.ink} />
-            {activity && <span className="ps-pulse" style={{ position: 'absolute', right: -1, bottom: -1, width: 11, height: 11, borderRadius: '50%', background: '#7BD3B0', border: `2px solid ${C.ink}` }} />}
+        {/* The avatar and name open the agent's settings (as on the web): its profile and tabs for an owner, the profile for a connected person. */}
+        <button
+          onClick={() => openAgentTab('profile')} title="Open this agent's profile and settings" aria-label="Open agent profile and settings" className="ps-rail-btn"
+          style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 12, border: 'none', background: 'transparent', color: 'inherit', textAlign: 'left', cursor: 'pointer', padding: '6px 8px', margin: '0 -8px', borderRadius: 8 }}
+        >
+          {agent && (
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              <Avatar name={agent.name} url={agent.avatar_url} size={40} ring ringGap={C.ink} />
+              {activity && <span className="ps-pulse" style={{ position: 'absolute', right: -1, bottom: -1, width: 11, height: 11, borderRadius: '50%', background: '#7BD3B0', border: `2px solid ${C.ink}` }} />}
+            </span>
+          )}
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'block', fontSize: 15.5, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: C.bg }}>{agent?.name ?? 'Agent'}</span>
+            <span style={{ display: 'block', fontSize: 12, color: activity ? '#7BD3B0' : '#B9B4A2', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{subtitle}</span>
           </span>
-        )}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15.5, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{agent?.name ?? 'Agent'}</div>
-          <div style={{ fontSize: 12, color: activity ? '#7BD3B0' : '#B9B4A2', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{subtitle}</div>
-        </div>
+        </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <CountPill label="Tasks" count={counts.tasks} />
           <CountPill label="Shifts" count={counts.shifts} />
