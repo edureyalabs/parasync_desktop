@@ -1,0 +1,39 @@
+# electron-builder.yml
+appId: in.parasync.desktop
+productName: Parasync
+copyright: Parasync Technologies Pvt Ltd
+directories:
+  buildResources: resources
+  output: dist
+files:
+  - out/**
+  - resources/icon.png
+  - package.json
+asar: true
+compression: normal
+protocols:
+  - name: Parasync
+    schemes:
+      - parasync
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.png
+  artifactName: Parasync-Setup.${ext}
+  # Not code-signed yet: Windows SmartScreen warns on first install. Add a signing certificate before customers install this.
+nsis:
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Parasync
+publish:
+  provider: github
+  owner: edureyalabs
+  repo: parasync_desktop
+  releaseType: release

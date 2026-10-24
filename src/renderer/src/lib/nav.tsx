@@ -1,0 +1,33 @@
+// src/renderer/src/lib/nav.tsx
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+
+export type Section = 'agents' | 'discover' | 'requests' | 'account';
+
+interface NavCtx {
+  section: Section;
+  agentId: string | null;
+  go: (section: Section) => void;
+  openAgent: (id: string | null) => void;
+}
+
+const NavContext = createContext<NavCtx | null>(null);
+
+export function useNav(): NavCtx {
+  const ctx = useContext(NavContext);
+  if (!ctx) throw new Error('useNav must be used inside NavProvider');
+  return ctx;
+}
+
+export function NavProvider({ children }: { children: ReactNode }) {
+  const [section, setSection] = useState<Section>('agents');
+  const [agentId, setAgentId] = useState<string | null>(null);
+
+  const go = useCallback((next: Section) => setSection(next), []);
+  const openAgent = useCallback((id: string | null) => {
+    setAgentId(id);
+    if (id) setSection('agents');
+  }, []);
+
+  const value = useMemo(() => ({ section, agentId, go, openAgent }), [section, agentId, go, openAgent]);
+  return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
+}
