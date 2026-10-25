@@ -8,6 +8,9 @@ import ShiftHistoryRow from '@/components/shifts/ShiftHistoryRow';
 import { useShiftsPanel } from '@/components/shifts/useShiftsPanel';
 import ProjectHistoryRow from '@/components/projects/ProjectHistoryRow';
 import { useProjectsPanel } from '@/components/projects/useProjectsPanel';
+import { useBrowserJobsPanel } from '@/components/browser-jobs/useBrowserJobsPanel';
+import BrowserJobCard from '@/components/browser-jobs/BrowserJobCard';
+import type { BrowserJob } from '@/components/browser-jobs/types';
 import type { Project } from '@/components/projects/types';
 import type { ShiftRun } from '@/components/shifts/types';
 import { createClient } from '@/lib/supabase/client';
@@ -104,7 +107,8 @@ type HistoryEntry =
   | { kind: 'run'; sortTime: string; run: TaskRunRecord }
   | { kind: 'task'; sortTime: string; task: Task }
   | { kind: 'shift_run'; sortTime: string; run: ShiftRun }
-  | { kind: 'project'; sortTime: string; project: Project };
+  | { kind: 'project'; sortTime: string; project: Project }
+  | { kind: 'browser_job'; sortTime: string; job: BrowserJob };
 
 const HISTORY_PAGE_SIZE = 20;
 // Only finished runs belong in History. A 'running' or 'stuck' (recovering) run
@@ -134,7 +138,7 @@ function cardStyle(accent: string): React.CSSProperties {
   return { background: '#fff', border: '1px solid #E2DFD3', borderLeft: `3px solid ${accent}`, borderRadius: 6, padding: '1rem 1.25rem' };
 }
 
-function HistoryRow({ entry }: { entry: Exclude<HistoryEntry, { kind: 'shift_run' | 'project' }> }) {
+function HistoryRow({ entry }: { entry: Exclude<HistoryEntry, { kind: 'shift_run' | 'project' | 'browser_job' }> }) {
   if (entry.kind === 'task') {
     const { task } = entry;
     return (
@@ -848,6 +852,8 @@ function TasksSection({ agentId, orgId }: { agentId: string; orgId: string }) {
   const shifts = useShiftsPanel(agentId, true);     // every person's Runsheet lists their OWN shifts (owner or connected user)
   // Projects (each person's own) share the Active list and the History too.
   const projects = useProjectsPanel(agentId);
+  // Browser Access jobs (learning a site, looking for and building tools, setup, login tests): the owner's, with the same bead rail as a task.
+  const browserJobs = useBrowserJobsPanel(agentId, role === 'owner');
 
   useEffect(() => {
     if (!agentId) return;
@@ -1002,6 +1008,7 @@ function TasksSection({ agentId, orgId }: { agentId: string; orgId: string }) {
       kind: 'task' as const, sortTime: task.completed_at ?? task.updated_at, task,
     })).filter(e => new Date(e.sortTime).getTime() >= oldestLoadedRunTime),
     ...projects.history.map(project => ({ kind: 'project' as const, sortTime: project.ended_at ?? project.ends_at, project })).filter(e => new Date(e.sortTime).getTime() >= oldestLoadedRunTime),
+    ...browserJobs.history.map(job => ({ kind: 'browser_job' as const, sortTime: job.ended_at ?? job.started_at, job })).filter(e => new Date(e.sortTime).getTime() >= oldestLoadedRunTime),
   ].filter(e => e.kind !== 'run' || new Date(e.sortTime).getTime() >= oldestLoadedRunTime).sort((a, b) => new Date(b.sortTime).getTime() - new Date(a.sortTime).getTime());
 
   const handleTaskCreated = (task: Task) => {
@@ -1068,6 +1075,7 @@ function TasksSection({ agentId, orgId }: { agentId: string; orgId: string }) {
     }),
     ...shifts.activeEntries,
     ...projects.activeEntries,
+    ...browserJobs.activeEntries,
   ].sort((a, b) => a.rank - b.rank || a.at - b.at);
 
   if (loading) {
@@ -1092,7 +1100,7 @@ function TasksSection({ agentId, orgId }: { agentId: string; orgId: string }) {
       <TabHeader
         title="What's queued for this agent."
         subtitle={role === 'owner'
-          ? 'Tasks and shifts set up for this agent, created here or by the agent itself in chat.'
+          ? 'Tasks and shifts set up for this agent, created here or by the agent itself in chat, and the background work on its Browser Access sites.'
           : 'Tasks you’ve requested of this agent, created here or by the agent itself in chat.'}
         note={role === 'owner' ? 'What people connected to this agent ask of it stays with them, on their own Runsheet.' : undefined}
         actions={userId ? (
@@ -1145,7 +1153,9 @@ function TasksSection({ agentId, orgId }: { agentId: string; orgId: string }) {
             ? <ShiftHistoryRow key={entry.run.id} run={entry.run} shift={shifts.shiftById(entry.run.shift_id)} onOpen={() => shifts.openRun(entry.run)} />
             : entry.kind === 'project'
               ? <ProjectHistoryRow key={entry.project.id} project={entry.project} />
-              : <HistoryRow key={entry.kind === 'run' ? entry.run.id : entry.task.id} entry={entry} />)}
+              : entry.kind === 'browser_job'
+                ? <BrowserJobCard key={entry.job.id} history job={entry.job} access={browserJobs.accessOf.get(entry.job.access_id)} steps={browserJobs.stepsOf(entry.job.id)} onCancel={() => undefined} />
+                : <HistoryRow key={entry.kind === 'run' ? entry.run.id : entry.task.id} entry={entry} />)}
           {anyHistoryMore && (
             <div ref={historySentinelRef} style={{ padding: '0.75rem 0', display: 'flex', justifyContent: 'center', minHeight: 24 }}>
               {historyLoadingMore && <Spinner size={16} />}
@@ -1156,6 +1166,7 @@ function TasksSection({ agentId, orgId }: { agentId: string; orgId: string }) {
 
       {shifts.dialogs}
       {projects.dialogs}
+      {browserJobs.dialogs}
       {showShiftModal && userId && (
         <NewShiftModal agentId={agentId} orgId={orgId} userId={userId} onClose={() => setShowShiftModal(false)} onCreated={() => setShowShiftModal(false)} />
       )}

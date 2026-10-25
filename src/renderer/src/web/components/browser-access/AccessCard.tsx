@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { EnableToggles } from '@/components/EnableToggles';
 import { Icon, type IconName } from '@/components/icons/Icon';
@@ -16,13 +17,15 @@ import { Btn, Chip, ErrorText, IconTile, Spinner, post } from './ui';
 import { STATUS_TEXT, STATUS_TONE, type Access } from './types';
 
 // One site the agent may sign in to. Collapsed it is a single compact row: the site, its status, the one action that matters now, and the owner's switches.
-// "Manage" opens four tabs (Activity, Manual, Tools, Rules) so only one section is on screen at a time. While a setup is running the card opens itself on Activity.
+// "Manage" opens three tabs (Guide, Tools, Rules) so only one section is on screen at a time. While a setup is running the card opens itself on Activity (the
+// sign-in is interactive); everything else the background agents do (learning, looking for tools, building them) is followed in the Runsheet, not here.
 
 type TabId = 'activity' | 'manual' | 'tools' | 'rules';
 
+const KIND_TEXT: Record<string, string> = { onboard: 'Setup', test: 'Login test', learn: 'Learning', research: 'Tool search', build: 'Tool build', study: 'Study', condense: 'Condense' };
+
 const TABS: { id: TabId; label: string; icon: IconName }[] = [
-  { id: 'activity', label: 'Activity', icon: 'activity' },
-  { id: 'manual', label: 'Manual', icon: 'book-open' },
+  { id: 'manual', label: 'Guide', icon: 'book-open' },
   { id: 'tools', label: 'Tools', icon: 'wrench' },
   { id: 'rules', label: 'Rules', icon: 'shield-check' },
 ];
@@ -35,16 +38,18 @@ export function AccessCard({ access, agentId, isShared, onUpdated, onDeleted }: 
   access: Access; agentId: string; isShared: boolean; onUpdated: (a: Access) => void; onDeleted: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [tab, setTab] = useState<TabId>(access.status === 'ready' && access.profile ? 'manual' : 'activity');
+  const [tab, setTab] = useState<TabId>('manual');
   const [busy, setBusy] = useState<'start' | 'test' | 'cancel' | 'delete' | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
+  const [note, setNote] = useState('');
   const [showCreds, setShowCreds] = useState(false);
   const [logKey, setLogKey] = useState(0);
   const [toolCount, setToolCount] = useState<number | null>(null);
+  const [latest, setLatest] = useState<{ kind: string; status: string; error: string | null; started_at: string } | null>(null);
   const working = access.status === 'onboarding' || access.status === 'awaiting_credentials';
   const open = expanded || working;
-  const activeTab: TabId = working ? 'activity' : tab;
+  const activeTab: TabId = working ? 'activity' : tab === 'activity' ? 'manual' : tab;
 
   // The moment the assistant asks for the details the secure form opens by itself (until dismissed; a new setup re-arms it).
   const [credsDismissed, setCredsDismissed] = useState(false);
@@ -57,6 +62,8 @@ export function AccessCard({ access, agentId, isShared, onUpdated, onDeleted }: 
     (async () => {
       const { count: tools } = await supabase.from('agent_created_tools').select('id', { count: 'exact', head: true }).eq('access_id', access.id);
       if (!cancelled) setToolCount(tools ?? 0);
+      const { data: runs } = await supabase.from('browser_access_runs').select('kind, status, error, started_at').eq('access_id', access.id).order('started_at', { ascending: false }).limit(1);
+      if (!cancelled) setLatest((runs?.[0] as typeof latest) ?? null);
     })();
     return () => { cancelled = true; };
   }, [access.id, logKey]);
@@ -76,8 +83,8 @@ export function AccessCard({ access, agentId, isShared, onUpdated, onDeleted }: 
     const result = await post(`/api/agents/${agentId}/browser-access/${access.id}/${action}`);
     setBusy(null);
     if (!result.ok) { setError(result.error || 'Failed.'); return; }
-    setExpanded(true);
-    setTab('activity');
+    if (action === 'test') setNote('Login test started. Follow it in the Runsheet.');
+    else setExpanded(true);
     setLogKey(k => k + 1);
   };
 
@@ -129,7 +136,7 @@ export function AccessCard({ access, agentId, isShared, onUpdated, onDeleted }: 
           />
           <button
             type="button" className="ba-btn ba-outline" onClick={() => setExpanded(v => !v)} aria-expanded={open} disabled={working}
-            title={open ? 'Hide details' : 'Manual, tools, rules and activity'}
+            title={open ? 'Hide details' : 'Guide, tools and rules'}
           >
             Manage
             <span style={{ display: 'inline-flex', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}><Icon name="chevron-down" size={12} /></span>
@@ -139,19 +146,26 @@ export function AccessCard({ access, agentId, isShared, onUpdated, onDeleted }: 
 
       {(access.status !== 'draft' || access.last_verified_at) && (
         <div style={{ padding: '0 1.05rem 0.75rem', display: 'flex', gap: '0.9rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          {access.profile && <Meta><Icon name="book-open" size={11} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />~{Math.round(access.coverage_pct ?? 0)}% explored · v{access.profile_version}</Meta>}
+          {access.profile && <Meta><Icon name="book-open" size={11} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />Guide v{access.profile_version}</Meta>}
           {toolCount ? <Meta><Icon name="wrench" size={11} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />{toolCount} tool{toolCount === 1 ? '' : 's'}</Meta> : null}
           {access.last_verified_at && <Meta><Icon name="circle-check" size={11} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />Login verified {new Date(access.last_verified_at).toLocaleDateString()}</Meta>}
           {access.status === 'failed' && access.last_error && <span style={{ fontSize: '0.74rem', color: C.red, minWidth: 0 }}>{access.last_error}</span>}
+          {latest && !working && (
+            <Link href={`/agents/${agentId}/crons`} style={{ fontSize: '0.72rem', color: latest.status === 'failed' && latest.error !== 'cancelled' ? C.red : C.soft, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              {(latest.status === 'running' || latest.status === 'queued') && <Spinner size={9} />}
+              {KIND_TEXT[latest.kind] ?? 'Job'} {latest.status === 'running' ? 'working' : latest.status === 'queued' ? 'queued' : latest.status === 'done' ? 'finished' : latest.error === 'cancelled' ? 'cancelled' : 'did not finish'} · see the Runsheet
+            </Link>
+          )}
         </div>
       )}
       {error && <div style={{ padding: '0 1.05rem 0.75rem' }}><ErrorText>{error}</ErrorText></div>}
+      {note && !error && <div style={{ padding: '0 1.05rem 0.75rem', fontSize: '0.74rem', color: C.soft }}>{note}</div>}
 
       {open && (
         <div style={{ borderTop: `1px solid ${C.lineSoft}`, background: C.paper }}>
           <div role="tablist" aria-label="Access details" style={{ display: 'flex', gap: '0.2rem', padding: '0.55rem 0.8rem', borderBottom: `1px solid ${C.lineSoft}`, overflowX: 'auto' }}>
-            {TABS.map(t => (
-              <button key={t.id} type="button" role="tab" aria-selected={activeTab === t.id} className="ba-tab" disabled={working && t.id !== 'activity'} onClick={() => setTab(t.id)}>
+            {(working ? [] : TABS).map(t => (
+              <button key={t.id} type="button" role="tab" aria-selected={activeTab === t.id} className="ba-tab" onClick={() => setTab(t.id)}>
                 <Icon name={t.icon} size={13} />{t.label}
                 {t.id === 'tools' && toolCount ? <span style={{ fontFamily: MONO, fontSize: '0.64rem', opacity: 0.75 }}>{toolCount}</span> : null}
               </button>
@@ -159,8 +173,8 @@ export function AccessCard({ access, agentId, isShared, onUpdated, onDeleted }: 
           </div>
           <div style={{ padding: '1rem 1.05rem 1.1rem' }}>
             {activeTab === 'activity' && <Activity accessId={access.id} refreshKey={logKey} />}
-            {activeTab === 'manual' && <ManualPanel access={access} agentId={agentId} onUpdated={onUpdated} onStudyStarted={() => { setTab('activity'); setLogKey(k => k + 1); }} />}
-            {activeTab === 'tools' && <ToolsPanel access={access} agentId={agentId} onChanged={() => setLogKey(k => k + 1)} onOpenActivity={() => setTab('activity')} />}
+            {activeTab === 'manual' && <ManualPanel access={access} agentId={agentId} onUpdated={onUpdated} />}
+            {activeTab === 'tools' && <ToolsPanel access={access} agentId={agentId} onChanged={() => setLogKey(k => k + 1)} />}
             {activeTab === 'rules' && <RulesPanel access={access} onUpdated={onUpdated} />}
           </div>
           {!working && access.fields.length > 0 && (

@@ -2,6 +2,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { C, MONO } from '@/components/account/tokens';
 import { Btn, Chip, ErrorText, IconTile, Spinner, post } from './ui';
@@ -103,8 +104,8 @@ function ProposalCard({ proposal, selected, remarks, open, disabled, onSelect, o
   );
 }
 
-export function ToolsPanel({ access, agentId, onChanged, onOpenActivity }: {
-  access: Access; agentId: string; onChanged: () => void; onOpenActivity: () => void;
+export function ToolsPanel({ access, agentId, onChanged }: {
+  access: Access; agentId: string; onChanged: () => void;
 }) {
   const [proposals, setProposals] = useState<ToolProposal[]>([]);
   const [tools, setTools] = useState<LinkedToolRow[]>([]);
@@ -217,7 +218,7 @@ export function ToolsPanel({ access, agentId, onChanged, onOpenActivity }: {
         <div role="status" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', background: C.brassWash, border: `1px solid ${C.brassLine}`, borderRadius: 10, padding: '0.55rem 0.8rem', flexWrap: 'wrap' }}>
           <Spinner size={12} color={C.brassDeep} />
           <span style={{ fontSize: '0.78rem', color: C.ink }}>{runWord}…</span>
-          <span style={{ marginLeft: 'auto' }}><Btn onClick={onOpenActivity}>See activity</Btn></span>
+          <Link href={`/agents/${agentId}/crons`} style={{ marginLeft: 'auto', fontSize: '0.74rem', color: C.brassDeep, textDecoration: 'underline' }}>Follow it in the Runsheet</Link>
         </div>
       )}
       {!live && run?.status === 'failed' && run.error && run.error !== 'cancelled' && <ErrorText>The last {run.kind === 'build' ? 'build' : 'search'} did not finish: {run.error}</ErrorText>}
