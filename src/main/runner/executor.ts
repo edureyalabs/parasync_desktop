@@ -32,6 +32,7 @@ export class Executor {
   private jobsRun = 0;
   private lastCanaryAt = 0;
   private lastHeartbeatAt = 0;
+  private lastHeartbeatTry = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private ticking = false;
   private installing = false;
@@ -52,7 +53,7 @@ export class Executor {
     }
     if (changed) {
       this.stopped = false;
-      this.deviceId = (await this.d.getSetting('runner.deviceId')) ?? null;
+      this.deviceId = (await this.d.getSetting(`runner.deviceId.${userId}`)) ?? null; // one device id per signed-in account on this PC
       this.runnerVersion = await this.d.getSetting('runner.version');
       const enabled = (await this.d.getSetting(`runner.enabled.${userId}`)) === '1';
       this.set({ state: enabled ? 'checking' : 'off', enabled });
@@ -120,7 +121,17 @@ export class Executor {
         if (!ok) return;
       }
       if (this.status.state !== 'ready' && this.status.state !== 'busy') return;
-      if (now - this.lastHeartbeatAt >= RUNNER_CONFIG.heartbeatMs) await this.heartbeat(true);
+      if (now - this.lastHeartbeatAt >= RUNNER_CONFIG.heartbeatMs && now - this.lastHeartbeatTry >= 10_000) {
+        this.lastHeartbeatTry = now; // a failing register call is retried every 10 s at most, never every poll
+        try {
+          await this.heartbeat(true);
+          if (this.status.message?.startsWith('Could not register')) this.set({ ...this.status, message: undefined });
+        } catch (e) {
+          if (e instanceof SignedOutError) throw e;
+          this.d.log(`heartbeat failed: ${e instanceof Error ? e.message : String(e)}`);
+          this.set({ ...this.status, message: 'Could not register this PC with Parasync. Retrying…' });
+        }
+      }
 
       const jobs = await this.d.cloud.queuedJobs(await this.ensureDeviceId());
       for (const queued of jobs) {
@@ -193,7 +204,7 @@ export class Executor {
   private async ensureDeviceId(): Promise<string> {
     if (!this.deviceId) {
       this.deviceId = this.d.newId();
-      await this.d.setSetting('runner.deviceId', this.deviceId);
+      await this.d.setSetting(`runner.deviceId.${this.userId}`, this.deviceId);
     }
     return this.deviceId;
   }

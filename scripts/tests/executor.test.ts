@@ -125,3 +125,31 @@ test('the manifest is validated before anything is downloaded', () => {
   assert.throws(() => parseManifest({ ...ok, sha256: 'xyz' }));
   assert.throws(() => parseManifest(null));
 });
+
+test('a second account on the same PC gets its own device id', async () => {
+  const a = setup();
+  await enable(a.ex);
+  assert.ok(a.settings.has('runner.deviceId.user-1'));
+  await a.ex.setSession('user-2');
+  await a.ex.setEnabled(true);
+  a.ex.stop();
+  await a.ex.tick();
+  a.ex.stop();
+  assert.ok(a.settings.has('runner.deviceId.user-2'));
+});
+
+test('a failing device registration does not stop the loop and is not retried on every poll', async () => {
+  const t = setup();
+  let attempts = 0;
+  const cloud = (t.ex as unknown as { d: { cloud: Cloud } }).d.cloud;
+  cloud.saveDevice = async () => { attempts += 1; throw new Error('boom'); };
+  await t.ex.setSession('user-1');
+  await t.ex.setEnabled(true);
+  t.ex.stop();
+  await t.ex.tick();
+  await t.ex.tick();
+  await t.ex.tick();
+  t.ex.stop();
+  // the self-test registers once (it fails quietly); the poll registers at most once more inside the 10 s window
+  assert.ok(attempts >= 1 && attempts <= 3, `registered ${attempts} times`);
+});
