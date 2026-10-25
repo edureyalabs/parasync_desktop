@@ -85,15 +85,15 @@ test('secrets survive a restart and a sign-out (nothing is wiped by switching ac
   assert.equal(r.values.get(keyOf({ agentId: AGENT, kind: 'secret', name: 'TOKEN' }))!.value, 'persisted');
 });
 
-test('a stale copy is not supplied: the version must match the cloud, unless it lives on this PC only', async () => {
+test('the copy on this PC is used whatever version the cloud names (the two copies are kept separately)', async () => {
   const t = make();
-  await t.vault.put(A, put('TOKEN', 'old-value')); // version 3
-  const stale = await t.vault.resolve(A, [{ agentId: AGENT, kind: 'secret', name: 'TOKEN', version: 4 }]);
-  assert.equal(stale.values.size, 0);
-  assert.equal(stale.missing.length, 1);
-  await t.vault.put(A, put('LOCAL_ONLY', 'here-only', { deviceOnly: true, version: 1 }));
-  const local = await t.vault.resolve(A, [{ agentId: AGENT, kind: 'secret', name: 'LOCAL_ONLY', version: 99 }]);
-  assert.equal(local.values.size, 1);
+  await t.vault.put(A, put('TOKEN', 'my-value')); // version 3
+  const r = await t.vault.resolve(A, [{ agentId: AGENT, kind: 'secret', name: 'TOKEN', version: 4 }]);
+  assert.equal(r.values.size, 1);
+  assert.equal(r.missing.length, 0);
+  const none = await t.vault.resolve(A, [{ agentId: AGENT, kind: 'secret', name: 'ABSENT', version: 1 }]);
+  assert.equal(none.values.size, 0);
+  assert.equal(none.missing.length, 1);
 });
 
 test('held reports names and versions by agent and kind, nothing else', async () => {

@@ -8,6 +8,7 @@ import { Icon, type IconName } from '@/components/icons/Icon';
 import { C, MONO } from '@/components/account/tokens';
 import { Activity } from './Activity';
 import { CredentialsModal } from './Modals';
+import { LocalCopyRow } from '@/components/local-copy/LocalCopy';
 import { ManualPanel } from './ManualPanel';
 import { RulesPanel } from './RulesPanel';
 import { SkillsPanel } from './SkillsPanel';
@@ -162,6 +163,11 @@ export function AccessCard({ access, agentId, isShared, onUpdated, onDeleted }: 
             {activeTab === 'skills' && <SkillsPanel accessId={access.id} />}
             {activeTab === 'rules' && <RulesPanel access={access} onUpdated={onUpdated} />}
           </div>
+          {!working && access.fields.length > 0 && (
+            <div style={{ padding: '0.55rem 1.05rem', borderTop: `1px solid ${C.lineSoft}` }}>
+              <LocalCopyRow kind="browser_access" agentId={agentId} name={access.id} label={access.label || access.name} fields={access.fields} />
+            </div>
+          )}
           {!working && (
             <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center', padding: '0.55rem 0.8rem', borderTop: `1px solid ${C.lineSoft}` }}>
               {access.fields.length > 0 && <Btn variant="ghost" icon="key-round" onClick={() => setShowCreds(true)}>Edit sign-in details</Btn>}

@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
+import { DesktopAccountLinks } from '@/components/local-copy/LocalCopy';
 
 // Profile is deliberately last: the tabs people come back to (their workspaces, their
 // balance, what they spent) come first; the one-time account details come after.
@@ -62,6 +63,7 @@ export default function AccountLayout({ children }: { children: React.ReactNode 
               </Link>
             );
           })}
+          <DesktopAccountLinks />
         </nav>
 
         <div style={{ flex: 1 }} />

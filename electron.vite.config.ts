@@ -51,6 +51,7 @@ export default defineConfig({
         { find: '@/lib/supabase/client', replacement: resolve(__dirname, 'src/renderer/src/shims/supabaseClient.ts') },
         { find: '@uiw/react-codemirror', replacement: resolve(__dirname, 'src/renderer/src/shims/codemirror.tsx') },
         { find: '@codemirror/lang-python', replacement: resolve(__dirname, 'src/renderer/src/shims/langPython.ts') },
+        { find: '@/components/local-copy/LocalCopy', replacement: resolve(__dirname, 'src/renderer/src/shims/localCopy.tsx') },
         { find: '@shared', replacement: resolve(__dirname, 'src/shared') },
         { find: /^~\//, replacement: `${resolve(__dirname, 'src/renderer/src')}/` },
         { find: /^@\//, replacement: `${resolve(__dirname, 'src/renderer/src/web')}/` },

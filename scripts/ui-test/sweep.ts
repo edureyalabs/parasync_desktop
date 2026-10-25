@@ -17,7 +17,9 @@ const day = (n) => { const d = new Date(now - n * 86400000); return d.toISOStrin
 
 // ── fake web API (what the desktop app calls through its main process) ──
 const apiLog = [];
+const secretPosts = [];
 const api = http.createServer((req, res) => {
+  if (req.method === 'POST') { let raw = ''; req.on('data', (c) => { raw += c; }); req.on('end', () => { if (/\/secrets$/.test(req.url)) secretPosts.push(raw); }); }
   apiLog.push(`${req.method} ${req.url} auth=${(req.headers.authorization || '').slice(0, 14)}`);
   const ok = req.headers.authorization === `Bearer ${TOKEN}`;
   const j = (code, body) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
@@ -116,24 +118,47 @@ const USAGE = []; for (let i = 0; i < 40; i++) USAGE.push({ day: day(i), agent_i
   }
   await check('account pages', async () => { await fresh(); await win.getByTitle('Account').click(); await win.waitForTimeout(1200); for (const label of ['Billing', 'Usage', 'Profile']) { await win.getByText(label, { exact: true }).first().click(); await shot('x_acct_' + label); } });
   await check('about page', async () => { await fresh(); await win.getByLabel('About this app').click(); await shot('x_about'); });
-  await check('secrets on this PC: add, copy on save, check, remove', async () => {
-    await fresh(); await win.getByLabel('About this app').click(); await win.waitForTimeout(800);
-    await win.getByText('Add a secret to this PC').click();
-    await win.getByPlaceholder('STRIPE_KEY').fill('api_key');
-    await win.getByPlaceholder('Stays on this PC; never shown again').fill('sk-live-0123456789');
-    await win.getByRole('button', { name: 'Save', exact: true }).click(); await win.waitForTimeout(1500);
-    await shot('x_vault_after_add');
-    await win.getByText('API_KEY', { exact: false }).first().waitFor();
-    // a save made on a web-copy screen is also kept here
-    await win.evaluate(() => fetch('/api/agents/22222222-2222-4222-8222-2222222222a1/secrets', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'WEB_KEY', value: 'web-value-123456' }) }));
-    await fresh(); await win.getByLabel('About this app').click(); await win.waitForTimeout(1200);
-    await win.getByText('WEB_KEY', { exact: false }).first().waitFor();
-    await win.getByRole('button', { name: 'Check', exact: true }).first().click(); await win.waitForTimeout(1500); const body = await win.locator('body').innerText(); if (!body.includes('Matches the cloud')) throw new Error('no match line; page says: ' + body.slice(body.indexOf('Secrets on this PC'), body.indexOf('Secrets on this PC') + 700).replace(/\n+/g, ' / '));
-    await shot('x_vault');
+  await check('secrets: choose where to keep it, add/replace/remove a copy on this PC', async () => {
+    await fresh(); await toSettings(); await win.getByText('Secrets', { exact: true }).first().click(); await win.waitForTimeout(900);
+    // an existing secret has no copy here yet
+    await win.getByText('No copy on this PC').first().waitFor();
+    await win.getByText('Add for this PC').first().click();
+    await win.locator('input[type=password]').last().fill('sk-live-0123456789');
+    await win.getByRole('button', { name: 'Keep on this PC' }).click(); await win.waitForTimeout(1200);
+    await win.getByText('Copy kept on this PC').first().waitFor();
+    await shot('x_secret_copy_added');
+    // a new secret: cloud + this PC (default)
+    await win.getByRole('button', { name: /New secret/ }).click(); await win.waitForTimeout(500);
+    await win.getByPlaceholder('e.g. STRIPE_API_KEY').fill('both_key');
+    await win.locator('input[name=secret-value-field]').fill('both-value-123456');
+    await win.getByText('Keep a copy on this PC').waitFor();
+    await shot('x_secret_new_dialog');
+    await win.getByRole('button', { name: 'Add secret' }).click(); await win.waitForTimeout(1500);
+    // a new secret kept on this PC only: the cloud is sent just the name
+    await win.getByRole('button', { name: /New secret/ }).click(); await win.waitForTimeout(500);
+    await win.getByPlaceholder('e.g. STRIPE_API_KEY').fill('pc_only_key');
+    await win.locator('input[name=secret-value-field]').fill('pc-only-value-123456');
+    await win.getByLabel(/Save in Parasync/).uncheck();
+    await win.getByRole('button', { name: 'Add secret' }).click(); await win.waitForTimeout(1500);
+    const sent = secretPosts.map((x) => JSON.parse(x));
+    const both = sent.find((x) => x.name === 'BOTH_KEY'); const only = sent.find((x) => x.name === 'PC_ONLY_KEY');
+    if (!both || both.value !== 'both-value-123456') throw new Error('the cloud did not get the value for a cloud+PC secret: ' + JSON.stringify(both));
+    if (!only || 'value' in only || only.storage !== 'device_only') throw new Error('a PC-only secret must reach the cloud as a name only: ' + JSON.stringify(only));
     const list = await win.evaluate(() => window.parasync.vault.list());
-    if (JSON.stringify(list).includes('sk-live-0123456789') || JSON.stringify(list).includes('web-value-123456')) throw new Error('a value came back to the page');
+    const names = list.map((e) => e.name).sort().join(',');
+    if (names !== 'BOTH_KEY,PC_ONLY_KEY,WAREHOUSE_API_KEY') throw new Error('this PC holds: ' + names);
+    if (/sk-live-0123456789|both-value-123456|pc-only-value-123456/.test(JSON.stringify(list))) throw new Error('a value came back to the page');
+    // the About page lists them, and removes one
+    await fresh(); await win.getByLabel('About this app').click(); await win.waitForTimeout(1000);
+    await win.getByText('Kept on this PC').waitFor(); await win.getByText('BOTH_KEY', { exact: false }).first().waitFor();
+    await shot('x_vault');
     await win.getByRole('button', { name: 'Remove', exact: true }).first().click(); await win.waitForTimeout(800);
     await win.evaluate(() => window.parasync.vault.wipe());
+  });
+  await check('account menu has About this app', async () => {
+    await fresh(); await win.getByTitle('Account').click(); await win.waitForTimeout(1000);
+    await win.getByRole('button', { name: 'About this app' }).first().click(); await win.waitForTimeout(800);
+    await win.getByText('Kept on this PC').waitFor();
   });
   console.log(results.join('\n'));
   console.log('web api calls:', apiLog.filter((l, i, a) => a.indexOf(l) === i));

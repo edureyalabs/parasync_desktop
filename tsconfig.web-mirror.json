@@ -31,6 +31,9 @@
       "@/lib/supabase/client": [
         "./src/renderer/src/shims/supabaseClient.ts"
       ],
+      "@/components/local-copy/LocalCopy": [
+        "./src/renderer/src/shims/localCopy.tsx"
+      ],
       "@uiw/react-codemirror": [
         "./src/renderer/src/shims/codemirror.tsx"
       ],

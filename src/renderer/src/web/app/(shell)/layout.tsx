@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase/client';
+import { DesktopNavFooter } from '@/components/local-copy/LocalCopy';
 
 const NAV = [
   {
@@ -132,6 +133,7 @@ export default function ShellLayout({ children }: { children: React.ReactNode })
         >
           <LogoutIcon />
         </button>
+        <DesktopNavFooter />
       </nav>
 
       {/* Everything else */}

@@ -175,8 +175,9 @@ export class Vault {
   }
 
   /**
-   * The values for one job, used by the executor only. Each wanted reference must be held AND (unless it exists on this PC only) at the version
-   * the cloud expects. Whatever cannot be supplied is listed in `missing` and the caller refuses the job BEFORE running anything.
+   * The values for one job, used by the executor only. Each wanted reference must be held; the cloud's copy and this PC's copy are kept
+   * separately by the person, so the version the cloud names is not compared. Whatever cannot be supplied is listed in `missing` and the
+   * caller refuses the job BEFORE running anything.
    * Using an entry counts as using it (it keeps the entry from expiring).
    */
   resolve(userId: string, wanted: (Ref & { version?: number })[]): Promise<{ values: Map<string, Entry>; missing: Ref[] }> {
@@ -190,8 +191,7 @@ export class Vault {
       for (const w of wanted) {
         const ref = validateRef(w);
         const entry = entries[keyOf(ref)];
-        const versionOk = entry && (entry.deviceOnly || w.version === undefined || entry.version === w.version);
-        if (!entry || this.expired(entry) || !versionOk) { missing.push(ref); continue; }
+        if (!entry || this.expired(entry)) { missing.push(ref); continue; }
         values.set(keyOf(ref), entry);
         if (now.getTime() - Date.parse(entry.lastUsedAt) > VAULT_LIMITS.touchEveryMs) {
           entry.lastUsedAt = now.toISOString();

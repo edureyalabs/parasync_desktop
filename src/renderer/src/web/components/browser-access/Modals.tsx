@@ -7,6 +7,7 @@ import { Icon } from '@/components/icons/Icon';
 import { C } from '@/components/account/tokens';
 import { Btn, ErrorText, Modal, Spinner, formLabel, post } from './ui';
 import { ACCESS_COLUMNS, type Access } from './types';
+import { LocalSaveChoice } from '@/components/local-copy/LocalCopy';
 
 function slugify(text: string): string {
   const s = text.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
@@ -129,6 +130,7 @@ export function CredentialsModal({ agentId, access, onClose }: { agentId: string
             )}
           </div>
         ))}
+        <LocalSaveChoice kind="browser_access" agentId={agentId} />
         {error && <ErrorText>{error}</ErrorText>}
         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
           <Btn size="md" onClick={onClose}>Cancel</Btn>

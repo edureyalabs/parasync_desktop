@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAgentCtx } from '../layout';
 import { createClient } from '@/lib/supabase/client';
 import { TabHeader, HeaderButton } from '@/components/agent-ui/TabHeader';
+import { LocalCopyRow, LocalSaveChoice } from '@/components/local-copy/LocalCopy';
 
 interface Secret {
   id:                string;
@@ -13,6 +14,7 @@ interface Secret {
   created_at:        string;
   agent_importable:  boolean;
   allowed_hosts:     string[] | null;
+  storage?:          string | null;
 }
 
 interface UserSecretDef {
@@ -152,6 +154,7 @@ function CreateSecretModal({ agentId, onClose, onCreated }: {
             <p style={{ fontSize: '0.72rem', color: '#9E9C8F', margin: '0.3rem 0 0' }}>
               Encrypted at rest. You won&apos;t be able to view this value again after saving — only replace or delete it.
             </p>
+            <LocalSaveChoice kind="secret" agentId={agentId} />
           </div>
         </div>
 
@@ -453,7 +456,7 @@ export default function SecretsPage() {
     (async () => {
       const supabase = createClient();
       const [{ data: secretsData }, { data: defsData }] = await Promise.all([
-        supabase.from('secrets').select('id, name, context, created_at, agent_importable, allowed_hosts').eq('agent_id', agentId).order('name', { ascending: true }),
+        supabase.from('secrets').select('id, name, context, created_at, agent_importable, allowed_hosts, storage').eq('agent_id', agentId).order('name', { ascending: true }),
         supabase.from('agent_user_secret_defs').select('id, name, context, required, created_at, agent_importable, allowed_hosts').eq('agent_id', agentId).order('name', { ascending: true }),
       ]);
       setSecrets((secretsData as Secret[]) ?? []);
@@ -535,7 +538,10 @@ export default function SecretsPage() {
               <div key={s.id} style={{ background: '#fff', border: '1px solid #E2DFD3', borderRadius: 6, padding: '1rem 1.25rem' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem' }}>
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: '0.85rem', fontWeight: 500, color: '#26251E', margin: '0 0 0.3rem' }}>{s.name}</p>
+                    <p style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: '0.85rem', fontWeight: 500, color: '#26251E', margin: '0 0 0.3rem' }}>
+                      {s.name}
+                      {s.storage === 'device_only' && <span style={{ marginLeft: '0.5rem', fontSize: '0.62rem', padding: '0.1rem 0.4rem', borderRadius: 3, background: '#EDEBE2', color: '#67655A', border: '1px solid #E2DFD3' }}>no value in the cloud</span>}
+                    </p>
                     <p style={{ fontSize: '0.8rem', color: '#67655A', margin: 0, lineHeight: 1.6 }}>{s.context || 'No description.'}</p>
                   </div>
                   <button
@@ -553,6 +559,7 @@ export default function SecretsPage() {
                   allowedHosts={s.allowed_hosts}
                   onUpdated={(ai, ah) => handleSecretUpdated(s.id, ai, ah)}
                 />
+                <LocalCopyRow kind="secret" agentId={agentId} name={s.name} />
               </div>
             ))}
           </div>

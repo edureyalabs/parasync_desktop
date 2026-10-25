@@ -39,4 +39,4 @@ while its self-test passes; never loosen who may claim a job (the database funct
 **Read `docs/LOCAL_EXECUTION.md` first** for anything in this area: it is the single self-contained description of the whole system (all four repos, the
 mailbox tables, routing rules, trust rules, timings, release steps, debugging cookbook) and has a state log at the bottom — append to it when you change things.
 
-**Secrets kept on the PC** (vault, local broker, PC-only secrets): `docs/LOCAL_SECRETS.md` — read it before touching `src/main/vault/`, `src/main/runner/localSecrets.ts`, `LocalSecretsCard.tsx` or `lib/localCopy.ts`. The page may add, check and remove secrets but must never be able to read one back; keep it that way.
+**Secrets kept on the PC** (vault, local broker, PC-only secrets): `docs/LOCAL_SECRETS.md` — read it before touching `src/main/vault/`, `src/main/runner/localSecrets.ts`, `LocalSecretsCard.tsx` or `lib/localCopy.ts`. The page may add and remove copies but must never be able to read one back; keep it that way. The controls live in `shims/localCopy.tsx` (the answer to the web's `components/local-copy/LocalCopy.tsx` slots), not in the About page.

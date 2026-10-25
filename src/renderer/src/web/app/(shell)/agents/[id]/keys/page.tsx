@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAgentCtx } from '../layout';
 import { createClient } from '@/lib/supabase/client';
 import { TabHeader } from '@/components/agent-ui/TabHeader';
+import { LocalCopyRow, LocalSaveChoice } from '@/components/local-copy/LocalCopy';
 
 interface KeyDef {
   id:       string;
@@ -110,6 +111,7 @@ function SetKeyValueModal({ agentId, def, hasValue, onClose, onSaved }: {
           <p style={{ fontSize: '0.72rem', color: '#9E9C8F', margin: '0.3rem 0 0' }}>
             Encrypted at rest. Only you can see or change this — the agent&apos;s creator never sees the value.
           </p>
+          <LocalSaveChoice kind="user_secret" agentId={agentId} />
         </div>
 
         {error && (
@@ -200,6 +202,7 @@ export default function KeysPage() {
                       </span>
                     </div>
                     <p style={{ fontSize: '0.8rem', color: '#67655A', margin: 0, lineHeight: 1.6 }}>{d.context || 'No description.'}</p>
+                    <LocalCopyRow kind="user_secret" agentId={agentId} name={d.name} />
                   </div>
                   <button
                     onClick={() => setEditingDef(d)}

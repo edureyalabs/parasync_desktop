@@ -2,7 +2,7 @@
 // The web app's screens call its own server with relative addresses (`fetch('/api/...')`, authorised by a browser cookie). The
 // desktop has no cookie and no such server at its own address, so those calls are sent through the main process
 // (src/main/webApi.ts) to the real site with the person's login token. Anything else (Supabase, other sites) passes straight through.
-import { keepLocalCopy } from '~/lib/localCopy';
+import { getSaveChoice, keepLocalCopy, withoutCloudValue } from '~/lib/localCopy';
 import { supabase } from '~/lib/supabase';
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -43,11 +43,13 @@ export function installApiBridge(): void {
     const token = data.session?.access_token;
     if (!token) return json(401, { error: 'You are signed out.' });
 
+    // The save dialog may say "keep it on this PC only": then the cloud is sent just the name.
+    const choice = method === 'POST' ? getSaveChoice() : null;
     const res = await window.parasync.api({
-      path: url.pathname, query: Object.fromEntries(url.searchParams), method: method as Method, body, files, fields, token,
+      path: url.pathname, query: Object.fromEntries(url.searchParams), method: method as Method, body: withoutCloudValue(url.pathname, body, choice), files, fields, token,
     });
-    // A secret the person just saved is also kept on this PC (unless they turned that off), after the cloud accepted it.
-    await keepLocalCopy(url.pathname, method, body, res.status, res.data, init?.headers);
+    // If the person ticked "keep on this PC", the value they just typed is also kept here, after the cloud accepted the save.
+    await keepLocalCopy(url.pathname, method, body, res.status, res.data, choice);
     return json(res.status || 503, res.data);
   };
 }
