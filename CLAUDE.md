@@ -36,3 +36,5 @@ Runs agents' tool code in the app's own WSL2 distro (`ParasyncRunner`, built in 
 never gets service keys (only the person's own token, in memory, RLS-limited); every download is host-allowlisted and sha256-checked before
 `wsl --import`; the executor (`executor.ts`) imports nothing from Electron so it can be tested alone (`npm test`); a device is `ready` only
 while its self-test passes; never loosen who may claim a job (the database function checks the owner). Design and status: docs/HANDOFF.md.
+**Read `docs/LOCAL_EXECUTION.md` first** for anything in this area: it is the single self-contained description of the whole system (all four repos, the
+mailbox tables, routing rules, trust rules, timings, release steps, debugging cookbook) and has a state log at the bottom — append to it when you change things.

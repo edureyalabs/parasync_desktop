@@ -4,6 +4,7 @@
 import { spawn } from 'node:child_process';
 
 import { RUNNER_CONFIG } from '../../shared/runner';
+import type { HostProcess } from './browserHost';
 
 const MARKER = '__PARASYNC_JOB_RESULT__';
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024; // the result carries output files as base64; the cloud caps them at 25 MB
@@ -93,10 +94,52 @@ export async function unregisterDistro(packaged: boolean): Promise<void> {
  * `--exec` passes the script as one argument, so no shell re-parses it. No double quotes in the script: Windows quoting.
  */
 export function jobArgs(limit: number): string[] {
-  const script =
-    'echo -1 > /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null; chmod 700 /run/WSL 2>/dev/null; ' +
-    `exec runuser -u runner -- env -u WSL_INTEROP timeout --signal=KILL ${limit} python3 /opt/runner/run_job.py`;
+  const script = `${LOCK_INTEROP} exec runuser -u runner -- env -u WSL_INTEROP timeout --signal=KILL ${limit} python3 /opt/runner/run_job.py`;
   return ['-d', RUNNER_CONFIG.distro, '-u', 'root', '--exec', 'sh', '-c', script];
+}
+
+const LOCK_INTEROP = 'echo -1 > /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null; chmod 700 /run/WSL 2>/dev/null;';
+
+/** The same start-up as a job, for a browser host: interop locked as root, then the unprivileged user runs browser_host.py for one session. */
+export function browserHostArgs(sessionId: string): string[] {
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(sessionId)) throw new Error('invalid session id');
+  const script = `${LOCK_INTEROP} exec runuser -u runner -- env -u WSL_INTEROP PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers python3 /opt/runner/browser_host.py ${sessionId}`;
+  return ['-d', RUNNER_CONFIG.distro, '-u', 'root', '--exec', 'sh', '-c', script];
+}
+
+/** Starts one browser host and hands back its pipes. The process lives until its pipe closes or `kill()`. */
+export function spawnBrowserHost(packaged: boolean, sessionId: string): HostProcess {
+  const child = spawn(wslBinary(packaged), browserHostArgs(sessionId), { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const lineListeners: ((line: string) => void)[] = [];
+  const exitListeners: ((code: number | null) => void)[] = [];
+  let buffered = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk: string) => {
+    buffered += chunk;
+    let at = buffered.indexOf('\n');
+    while (at >= 0) {
+      const line = buffered.slice(0, at).replace(/\r$/, '');
+      buffered = buffered.slice(at + 1);
+      for (const cb of lineListeners) cb(line);
+      at = buffered.indexOf('\n');
+    }
+  });
+  child.stderr.on('data', () => { /* Chromium and Playwright chatter: not part of the protocol */ });
+  child.stdin.on('error', () => { /* the process ended: reported through its exit */ });
+  let exited = false;
+  const notifyExit = (code: number | null) => {
+    if (exited) return;
+    exited = true;
+    for (const cb of exitListeners) cb(code);
+  };
+  child.on('error', () => notifyExit(null));
+  child.on('close', (code) => notifyExit(code));
+  return {
+    write: (line) => { child.stdin.write(line); },
+    onLine: (cb) => { lineListeners.push(cb); },
+    onExit: (cb) => { exitListeners.push(cb); },
+    kill: () => { try { child.stdin.end(); } catch { /* closed */ } child.kill('SIGKILL'); },
+  };
 }
 
 export type JobOutcome = { kind: 'result'; result: Record<string, unknown> } | { kind: 'failed'; message: string };

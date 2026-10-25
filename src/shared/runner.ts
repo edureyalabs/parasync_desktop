@@ -11,8 +11,32 @@ export const RUNNER_CONFIG = {
   /** How often the app tells the cloud it is alive, and how often it looks for work. */
   heartbeatMs: 30_000,
   pollMs: 1_500,
+  /** Poll faster while work is flowing (a browser session, or a job in the last 20 s): each browser step waits for one poll. */
+  activePollMs: 400,
+  activeWindowMs: 20_000,
   canaryEveryMs: 5 * 60_000,
+  /** The browser self-test launches Chromium, so it runs less often (and never while a browser session is open). */
+  browserCanaryEveryMs: 30 * 60_000,
+  /** How often to look for a newer Linux image, and the first image version that has a browser. */
+  updateCheckEveryMs: 6 * 60 * 60_000,
+  minBrowserRunner: '0.2.0',
+  /** Most browsers one PC keeps open at once, and most jobs it runs at once. */
+  maxBrowserSessions: 3,
+  maxParallelJobs: 4,
 } as const;
+
+/** Compares dotted version numbers ("0.10.0" > "0.9.2"). Anything that is not a number counts as 0. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map((n) => Number.parseInt(n, 10) || 0);
+  const pb = b.split('.').map((n) => Number.parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+export const runnerHasBrowser = (version: string | null): boolean => !!version && compareVersions(version, RUNNER_CONFIG.minBrowserRunner) >= 0;
 
 export type RunnerState =
   | 'off'            // the person has not switched it on
@@ -33,6 +57,12 @@ export interface RunnerStatus {
   deviceName?: string;
   lastCanaryAt?: string;
   jobsRun?: number;
+  /** Version of the Linux image installed on this PC, and whether it can run browser sessions (and does, per its own self-test). */
+  runnerVersion?: string;
+  browser?: 'unavailable' | 'checking' | 'ready' | 'error';
+  browserNote?: string;
+  /** Browsers open on this PC right now. */
+  browserSessions?: number;
 }
 
 /**

@@ -1,17 +1,37 @@
 // src/main/runner/executor.ts
 // The brain of local execution. It keeps this PC registered as a device, proves the Linux box works with a self-test ("canary"),
 // and only while that passes lets the cloud send work here. Work arrives as rows; each is claimed (first caller wins), run in the
-// Linux box as its own process, and answered. Nothing here knows about Electron: everything it touches is passed in, so it is tested
-// on its own (scripts/tests/executor.test.ts).
-import { RUNNER_CONFIG, SEALED_CHECK_CODE, type RunnerStatus } from '../../shared/runner';
+// Linux box and answered. Three kinds of work: a code run (its own short process), and the three browser verbs (open / exec / close) that
+// drive a long-lived browser process (browserHost.ts). It also keeps the Linux image up to date. Nothing here knows about Electron:
+// everything it touches is passed in, so it is tested on its own (scripts/tests/executor.test.ts).
+import { RUNNER_CONFIG, SEALED_CHECK_CODE, compareVersions, runnerHasBrowser, type RunnerStatus } from '../../shared/runner';
 import { SignedOutError, type Cloud } from './cloud';
 import type { JobOutcome } from './wsl';
+
+/** The browser side, as the executor sees it (browserHost.ts implements open/exec/close; index.ts adds the self-test). */
+export interface BrowserApi {
+  size(): number;
+  open(sessionId: string): Promise<{ ok: boolean; error?: string }>;
+  exec(sessionId: string, request: { code: string; files: Record<string, string>; env_vars: Record<string, string>; timeout: number }): Promise<Record<string, unknown>>;
+  close(sessionId: string): Promise<void>;
+  closeAll(): Promise<void>;
+  /** Self-test: start a browser, load a page, read it back, close it. */
+  check(): Promise<{ ok: boolean; note?: string }>;
+}
+
+/** Keeping the Linux image current: what is newest, and how to replace the installed one with it. */
+export interface UpdateApi {
+  latest(): Promise<string | null>;
+  apply(onPercent: (percent: number) => void): Promise<string>;
+}
 
 export interface ExecutorDeps {
   cloud: Cloud;
   wslAvailable(): Promise<boolean>;
   distroInstalled(): Promise<boolean>;
   runJob(job: unknown, timeoutSeconds: number): Promise<JobOutcome>;
+  browser?: BrowserApi;
+  update?: UpdateApi;
   getSetting(key: string): Promise<string | null>;
   setSetting(key: string, value: string): Promise<void>;
   newId(): string;
@@ -23,6 +43,10 @@ export interface ExecutorDeps {
 }
 
 const MAX_RESULT_BYTES = 20 * 1024 * 1024;
+const ENV_CHECK_EVERY_MS = 30_000;
+const SESSION_ID = /^[0-9a-fA-F-]{8,64}$/;
+
+interface Done { ok: boolean; result: unknown; error: string | null }
 
 export class Executor {
   private status: RunnerStatus = { state: 'off', enabled: false };
@@ -31,8 +55,16 @@ export class Executor {
   private runnerVersion: string | null = null;
   private jobsRun = 0;
   private lastCanaryAt = 0;
+  private lastBrowserCanaryAt = 0;
+  private lastUpdateCheckAt = 0;
   private lastHeartbeatAt = 0;
   private lastHeartbeatTry = 0;
+  private lastEnvCheckAt = 0;
+  private lastJobAt = 0;
+  private browserReady = false;
+  private wslOk = false;
+  private distroOk = false;
+  private readonly inflight = new Set<Promise<void>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private ticking = false;
   private installing = false;
@@ -42,22 +74,30 @@ export class Executor {
 
   getStatus(): RunnerStatus { return this.status; }
 
+  /** Waits for every job that is running right now (tests, and a clean shutdown). */
+  async drain(): Promise<void> { await Promise.all([...this.inflight]); }
+
   /** Called when the person signs in or out, and every time their token is renewed. */
   async setSession(userId: string | null): Promise<void> {
     const changed = userId !== this.userId;
     if (changed && this.userId && this.status.enabled) {
-      // Signing out, or switching to another account: tell the cloud this account's PC is no longer taking work, so its runs go
-      // to the cloud at once instead of waiting for the check-in to go stale. (Best effort: the old token is still held here.)
+      // Signing out, or switching to another account: the browsers of this account end with it, and the cloud is told this account's PC is
+      // no longer taking work, so its runs go to the cloud at once instead of waiting for the check-in to go stale. (Best effort: the old
+      // token is still held here.)
+      await this.d.browser?.closeAll();
       await this.heartbeat(false).catch(() => undefined);
     }
     this.userId = userId;
     if (!userId) {
+      this.browserReady = false;
       this.set({ state: 'off', enabled: false });
       this.stop();
       return;
     }
     if (changed) {
       this.stopped = false;
+      this.browserReady = false;
+      this.lastEnvCheckAt = 0;
       this.deviceId = (await this.d.getSetting(`runner.deviceId.${userId}`)) ?? null; // one device id per signed-in account on this PC
       this.runnerVersion = await this.d.getSetting('runner.version');
       const enabled = (await this.d.getSetting(`runner.enabled.${userId}`)) === '1';
@@ -70,7 +110,10 @@ export class Executor {
     if (!this.userId) return;
     await this.d.setSetting(`runner.enabled.${this.userId}`, enabled ? '1' : '0');
     this.lastCanaryAt = 0;
+    this.lastEnvCheckAt = 0;
     if (!enabled) {
+      this.browserReady = false;
+      await this.d.browser?.closeAll();
       this.set({ state: 'off', enabled: false });
       await this.heartbeat(false).catch(() => undefined); // tell the cloud right away: not ready, not accepting work
       return;
@@ -79,11 +122,14 @@ export class Executor {
     this.schedule(0);
   }
 
-  /** The person pressed "Install" (the Linux box itself is added by install.ts through `afterInstall`). */
+  /** The Linux box was just installed or replaced: remember which version, and test it afresh. */
   async afterInstall(version: string): Promise<void> {
     this.runnerVersion = version;
     await this.d.setSetting('runner.version', version);
     this.lastCanaryAt = 0;
+    this.lastBrowserCanaryAt = 0;
+    this.lastEnvCheckAt = 0;
+    this.browserReady = false;
     this.set({ ...this.status, state: 'checking', percent: undefined, message: undefined });
     this.schedule(0);
   }
@@ -93,11 +139,11 @@ export class Executor {
     if (percent !== null) this.set({ ...this.status, state: 'installing', percent });
   }
 
-  /** Called as the app quits: tell the cloud this PC is gone now, instead of leaving it "ready" until its check-in goes stale. */
+  /** Called as the app quits: end the browsers and tell the cloud this PC is gone now, instead of leaving it "ready" until its check-in goes stale. */
   async goodbye(): Promise<void> {
     if (!this.userId || !this.status.enabled) return;
     this.stop();
-    await this.heartbeat(false).catch(() => undefined);
+    await Promise.all([this.d.browser?.closeAll(), this.heartbeat(false).catch(() => undefined)]);
   }
 
   reportError(message: string): void {
@@ -119,20 +165,37 @@ export class Executor {
     this.timer = setTimeout(() => { void this.tick(); }, ms);
   }
 
+  /** Is anything going on that a person is waiting for? Then look for work faster. */
+  private active(now: number): boolean {
+    return this.inflight.size > 0 || (this.d.browser?.size() ?? 0) > 0 || now - this.lastJobAt < RUNNER_CONFIG.activeWindowMs;
+  }
+
   async tick(): Promise<void> {
     if (this.ticking || this.installing || !this.userId || !this.status.enabled) return;
     this.ticking = true;
     try {
-      if (!(await this.d.wslAvailable())) return this.fail('no-wsl', 'Windows’ Linux support (WSL2) is not available on this PC.');
-      if (!(await this.d.distroInstalled())) return this.fail('needs-install', 'The Linux box is not installed yet.');
-
       const now = this.d.now().getTime();
-      if (now - this.lastCanaryAt >= RUNNER_CONFIG.canaryEveryMs || this.status.state === 'checking') {
+      // wsl.exe is a real process on the PC: ask it whether Linux is there at most every 30 s (and again whenever something is wrong).
+      const stable = this.status.state === 'ready' || this.status.state === 'busy';
+      if (!stable || now - this.lastEnvCheckAt >= ENV_CHECK_EVERY_MS) {
+        this.wslOk = await this.d.wslAvailable();
+        this.distroOk = this.wslOk && (await this.d.distroInstalled());
+        this.lastEnvCheckAt = now;
+      }
+      if (!this.wslOk) return this.fail('no-wsl', 'Windows’ Linux support (WSL2) is not available on this PC.');
+      if (!this.distroOk) return this.fail('needs-install', 'The Linux box is not installed yet.');
+
+      if (this.inflight.size === 0 && (now - this.lastCanaryAt >= RUNNER_CONFIG.canaryEveryMs || this.status.state === 'checking')) {
         const ok = await this.canary();
         this.lastCanaryAt = now;
         if (!ok) return;
       }
       if (this.status.state !== 'ready' && this.status.state !== 'busy') return;
+      if (this.inflight.size === 0) {
+        await this.maybeUpdate(now);
+        if (this.installing) return;
+        await this.maybeBrowserCanary(now);
+      }
       if (now - this.lastHeartbeatAt >= RUNNER_CONFIG.heartbeatMs && now - this.lastHeartbeatTry >= 10_000) {
         this.lastHeartbeatTry = now; // a failing register call is retried every 10 s at most, never every poll
         try {
@@ -145,10 +208,13 @@ export class Executor {
         }
       }
 
-      const jobs = await this.d.cloud.queuedJobs(await this.ensureDeviceId());
-      for (const queued of jobs) {
-        const job = await this.d.cloud.claim(queued.id);
-        if (job) await this.runOne(job);
+      if (this.inflight.size < RUNNER_CONFIG.maxParallelJobs) {
+        const jobs = await this.d.cloud.queuedJobs(await this.ensureDeviceId());
+        for (const queued of jobs) {
+          if (this.inflight.size >= RUNNER_CONFIG.maxParallelJobs) break;
+          const job = await this.d.cloud.claim(queued.id);
+          if (job) this.start(job);
+        }
       }
     } catch (e) {
       if (e instanceof SignedOutError) {
@@ -160,9 +226,12 @@ export class Executor {
     } finally {
       this.ticking = false;
       const live = this.status.state === 'ready' || this.status.state === 'busy';
-      this.schedule(live ? RUNNER_CONFIG.pollMs : 15_000); // not working yet: look again later, without spawning wsl.exe every second
+      const delay = !live ? 15_000 : this.active(this.d.now().getTime()) ? RUNNER_CONFIG.activePollMs : RUNNER_CONFIG.pollMs;
+      this.schedule(delay); // not working yet: look again later, without spawning wsl.exe every second
     }
   }
+
+  // ── self-tests ────────────────────────────────────────────────────────────
 
   private async canary(): Promise<boolean> {
     this.set({ ...this.status, state: 'checking' });
@@ -180,44 +249,139 @@ export class Executor {
     return ok;
   }
 
+  /** Browsers need image 0.2.0+. Tested on its own, rarely, and never while a browser is open (an open one proves it works). */
+  private async maybeBrowserCanary(now: number): Promise<void> {
+    const browser = this.d.browser;
+    if (!browser) return;
+    if (!runnerHasBrowser(this.runnerVersion)) {
+      this.browserReady = false;
+      this.set({ ...this.status, browser: 'unavailable', browserNote: 'The Linux box has no browser yet; it updates itself when a newer one is published.' });
+      return;
+    }
+    if (browser.size() > 0) return;
+    if (this.browserReady && now - this.lastBrowserCanaryAt < RUNNER_CONFIG.browserCanaryEveryMs) return;
+    if (!this.browserReady && this.lastBrowserCanaryAt !== 0 && now - this.lastBrowserCanaryAt < RUNNER_CONFIG.canaryEveryMs) return; // a failing one: retry like the code self-test
+    this.set({ ...this.status, browser: 'checking', browserNote: undefined });
+    const result = await browser.check();
+    this.lastBrowserCanaryAt = now;
+    this.browserReady = result.ok;
+    this.set({ ...this.status, browser: result.ok ? 'ready' : 'error', browserNote: result.ok ? undefined : (result.note ?? 'The browser self-test failed.').slice(0, 300) });
+    await this.heartbeat(true, {
+      last_browser_canary_ok: result.ok,
+      last_browser_canary_note: result.ok ? null : (result.note ?? '').slice(0, 400),
+    }).catch(() => undefined);
+  }
+
+  /** Replaces the Linux box with a newer published one, but only while nothing is running (and tells the cloud first). */
+  private async maybeUpdate(now: number): Promise<void> {
+    const update = this.d.update;
+    if (!update || !this.runnerVersion) return;
+    if (this.lastUpdateCheckAt !== 0 && now - this.lastUpdateCheckAt < RUNNER_CONFIG.updateCheckEveryMs) return;
+    if ((this.d.browser?.size() ?? 0) > 0) return; // idle only: do not end somebody's browser
+    this.lastUpdateCheckAt = now;
+    let latest: string | null = null;
+    try {
+      latest = await update.latest();
+    } catch (e) {
+      this.d.log(`update check failed: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    if (!latest || compareVersions(latest, this.runnerVersion) <= 0) return;
+    this.d.log(`updating the Linux box ${this.runnerVersion} -> ${latest}`);
+    await this.heartbeat(false).catch(() => undefined);
+    this.browserReady = false;
+    this.installing = true;
+    this.set({ ...this.status, state: 'installing', percent: 0, message: `Updating the Linux box to ${latest}…` });
+    try {
+      const installed = await update.apply((percent) => this.set({ ...this.status, state: 'installing', percent }));
+      this.installing = false;
+      await this.afterInstall(installed);
+    } catch (e) {
+      this.installing = false;
+      this.lastEnvCheckAt = 0;
+      this.set({ ...this.status, state: 'error', percent: undefined, message: `The Linux box update failed: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  }
+
+  // ── running work ──────────────────────────────────────────────────────────
+
+  private start(job: { id: string; payload: unknown; timeout_seconds: number }): void {
+    this.lastJobAt = this.d.now().getTime();
+    const running = this.runOne(job).finally(() => {
+      this.inflight.delete(running);
+      this.lastJobAt = this.d.now().getTime();
+      if (this.status.state === 'busy' && this.inflight.size === 0) this.set({ ...this.status, state: 'ready', jobsRun: this.jobsRun });
+    });
+    this.inflight.add(running);
+  }
+
   private async runOne(job: { id: string; payload: unknown; timeout_seconds: number }): Promise<void> {
     this.set({ ...this.status, state: 'busy' });
     const keepAlive = setInterval(() => {
       void this.d.cloud.touch(job.id).catch(() => undefined);
       void this.heartbeat(true).catch(() => undefined); // a long job must not make this PC look gone
     }, 30_000);
-    let ok = false;
-    let result: unknown = null;
-    let error: string | null = null;
+    let done: Done;
     try {
       void this.d.cloud.touch(job.id).catch(() => undefined);
-      const outcome = await this.d.runJob(job.payload, job.timeout_seconds);
-      if (outcome.kind === 'result') {
-        result = outcome.result;
-        ok = outcome.result['ok'] === true;
-        if (!ok) error = String(outcome.result['error'] ?? 'The code reported an error.').slice(0, 1900);
-        if (JSON.stringify(result).length > MAX_RESULT_BYTES) {
-          ok = false;
-          result = null;
-          error = 'The result was too large to send back (over 20 MB).';
-        }
-      } else {
-        error = outcome.message;
-        result = { ok: false, error: outcome.message };
-      }
+      const kind = job.payload && typeof job.payload === 'object' ? (job.payload as { kind?: unknown }).kind : undefined;
+      done = typeof kind === 'string' && kind.startsWith('browser_')
+        ? await this.runBrowserJob(kind, job.payload as Record<string, unknown>)
+        : await this.runCodeJob(job);
       this.jobsRun += 1;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-      result = { ok: false, error };
+      const error = e instanceof Error ? e.message : String(e);
+      done = { ok: false, result: { ok: false, error }, error };
     } finally {
       clearInterval(keepAlive);
     }
     try {
-      await this.d.cloud.finish(job.id, ok, result, error);
+      await this.d.cloud.finish(job.id, done.ok, done.result, done.error);
     } catch (e) {
       this.d.log(`could not report job ${job.id}: ${e instanceof Error ? e.message : String(e)}`);
     }
-    this.set({ ...this.status, state: 'ready', jobsRun: this.jobsRun });
+  }
+
+  private async runCodeJob(job: { payload: unknown; timeout_seconds: number }): Promise<Done> {
+    const outcome = await this.d.runJob(job.payload, job.timeout_seconds);
+    if (outcome.kind !== 'result') return { ok: false, result: { ok: false, error: outcome.message }, error: outcome.message };
+    let ok = outcome.result['ok'] === true;
+    let result: unknown = outcome.result;
+    let error: string | null = ok ? null : String(outcome.result['error'] ?? 'The code reported an error.').slice(0, 1900);
+    if (JSON.stringify(result).length > MAX_RESULT_BYTES) {
+      ok = false;
+      result = null;
+      error = 'The result was too large to send back (over 20 MB).';
+    }
+    return { ok, result, error };
+  }
+
+  private async runBrowserJob(kind: string, p: Record<string, unknown>): Promise<Done> {
+    const browser = this.d.browser;
+    const fail = (error: string): Done => ({ ok: false, result: { ok: false, error }, error });
+    const sessionId = typeof p['session_id'] === 'string' ? p['session_id'] : '';
+    if (!browser || !SESSION_ID.test(sessionId)) return fail('browser jobs are not available here');
+    if (kind === 'browser_open') {
+      if (!this.browserReady) return fail('This PC is not ready for browsers.');
+      const r = await browser.open(sessionId);
+      return { ok: r.ok, result: r, error: r.ok ? null : (r.error ?? 'The browser could not be opened.') };
+    }
+    if (kind === 'browser_close') {
+      await browser.close(sessionId);
+      return { ok: true, result: { ok: true }, error: null };
+    }
+    if (kind === 'browser_exec') {
+      const code = typeof p['code'] === 'string' ? p['code'] : '';
+      const files = p['files'] && typeof p['files'] === 'object' ? (p['files'] as Record<string, string>) : {};
+      const env = p['env_vars'] && typeof p['env_vars'] === 'object' ? (p['env_vars'] as Record<string, string>) : {};
+      const timeout = typeof p['timeout'] === 'number' ? p['timeout'] : 120;
+      if (!code.trim()) return fail('no code provided');
+      const outcome = await browser.exec(sessionId, { code, files, env_vars: env, timeout });
+      const ok = outcome['ok'] === true;
+      if (JSON.stringify(outcome).length > MAX_RESULT_BYTES) return fail('The result was too large to send back (over 20 MB).');
+      return { ok, result: outcome, error: ok ? null : String(outcome['error'] ?? 'The script failed.').slice(0, 1900) };
+    }
+    return fail(`unknown job kind ${kind}`);
   }
 
   // ── cloud bookkeeping ─────────────────────────────────────────────────────
@@ -233,12 +397,14 @@ export class Executor {
   private async heartbeat(ready: boolean, extra: Record<string, unknown> = {}): Promise<void> {
     if (!this.userId) return;
     const id = await this.ensureDeviceId();
+    const isReady = ready && this.status.enabled;
     await this.d.cloud.saveDevice(id, this.userId, {
       name: this.d.deviceName,
       app_version: this.d.appVersion,
       runner_version: this.runnerVersion,
       local_enabled: this.status.enabled,
-      ready: ready && this.status.enabled,
+      ready: isReady,
+      browser_ready: isReady && this.browserReady,
       last_seen: this.d.now().toISOString(),
       ...extra,
     });
@@ -251,7 +417,12 @@ export class Executor {
   }
 
   private set(next: RunnerStatus): void {
-    this.status = { ...next, deviceName: this.d.deviceName };
+    this.status = {
+      ...next,
+      deviceName: this.d.deviceName,
+      runnerVersion: this.runnerVersion ?? undefined,
+      browserSessions: this.d.browser?.size() ?? 0,
+    };
     this.d.publish(this.status);
   }
 }

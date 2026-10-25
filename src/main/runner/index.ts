@@ -10,24 +10,81 @@ import { join } from 'node:path';
 import { APP_CONFIG } from '../../shared/config';
 import { IPC } from '../../shared/ipc';
 import { getItem, setItem } from '../secureStore';
+import { BrowserHosts } from './browserHost';
 import { createCloud } from './cloud';
-import { Executor } from './executor';
-import { downloadRootfs, fetchManifest } from './install';
-import { distroInstalled, importDistro, runJob, wslAvailable } from './wsl';
+import { Executor, type BrowserApi } from './executor';
+import { downloadRootfs, fetchManifest, type Manifest } from './install';
+import { distroInstalled, importDistro, runJob, spawnBrowserHost, unregisterDistro, wslAvailable } from './wsl';
 
 let executor: Executor | null = null;
 let token: string | null = null;
 let userIdNow: string | null = null;
 let installAbort: AbortController | null = null;
 
+const downloadDir = () => join(app.getPath('userData'), 'runner-download');
+const installDir = () => join(app.getPath('userData'), 'runner-distro');
+
+/**
+ * Downloads one published Linux image (checked against its checksum) and imports it as the app's own WSL distribution. With `replace`, the
+ * old distribution is removed only AFTER the new archive has been downloaded and verified, so a failed download never costs the old box.
+ */
+async function installFromManifest(manifest: Manifest, onPercent: (percent: number) => void, signal: AbortSignal, replace: boolean): Promise<void> {
+  try {
+    const archive = await downloadRootfs(downloadDir(), manifest, onPercent, signal);
+    onPercent(99);
+    if (replace) {
+      await unregisterDistro(app.isPackaged);
+      await fs.rm(installDir(), { recursive: true, force: true });
+    }
+    await fs.mkdir(installDir(), { recursive: true });
+    await importDistro(app.isPackaged, installDir(), archive);
+  } finally {
+    await fs.rm(downloadDir(), { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 export function startRunner(getWindow: () => BrowserWindow | null): void {
   const packaged = app.isPackaged;
   const windows = process.platform === 'win32' || (!packaged && !!process.env['PARASYNC_WSL_BIN']);
+
+  const hosts = new BrowserHosts((sessionId) => spawnBrowserHost(packaged, sessionId));
+  const browser: BrowserApi = {
+    size: () => hosts.size(),
+    open: (id) => hosts.open(id),
+    exec: (id, request) => hosts.exec(id, request),
+    close: (id) => hosts.close(id),
+    closeAll: () => hosts.closeAll(),
+    // The self-test: a real browser starts, loads a page and gives it back, then goes away.
+    check: async () => {
+      const id = randomUUID();
+      try {
+        const opened = await hosts.open(id);
+        if (!opened.ok) return { ok: false, note: opened.error ?? 'The browser did not start.' };
+        const outcome = await hosts.exec(id, { code: "page.goto('data:text/html,<title>ok</title>')\nresult = page.title()", files: {}, env_vars: {}, timeout: 60 });
+        return outcome['ok'] === true && outcome['result'] === 'ok'
+          ? { ok: true }
+          : { ok: false, note: String(outcome['error'] ?? 'The test page did not load.') };
+      } finally {
+        await hosts.close(id);
+      }
+    },
+  };
+
   executor = new Executor({
     cloud: createCloud(APP_CONFIG.supabaseUrl, APP_CONFIG.supabasePublishableKey, () => token),
     wslAvailable: async () => windows && wslAvailable(packaged),
     distroInstalled: async () => windows && distroInstalled(packaged),
     runJob: (job, seconds) => runJob(packaged, job, seconds),
+    browser,
+    update: {
+      latest: async () => (await fetchManifest(AbortSignal.timeout(20_000))).version,
+      apply: async (onPercent) => {
+        const abort = new AbortController();
+        const manifest = await fetchManifest(abort.signal);
+        await installFromManifest(manifest, onPercent, abort.signal, true);
+        return manifest.version;
+      },
+    },
     getSetting: (key) => getItem(key),
     setSetting: (key, value) => setItem(key, value),
     newId: () => randomUUID(),
@@ -40,7 +97,7 @@ export function startRunner(getWindow: () => BrowserWindow | null): void {
     },
     log: (message) => console.warn('[runner]', message),
   });
-  // Quitting: say goodbye to the cloud first (at most 3 s), then actually quit.
+  // Quitting: end the browsers and say goodbye to the cloud first (at most 3 s), then actually quit.
   let quitting = false;
   app.on('before-quit', (event) => {
     if (quitting || !executor) return;
@@ -72,26 +129,19 @@ export async function runnerSetEnabled(enabled: unknown): Promise<void> {
   await executor?.setEnabled(enabled);
 }
 
-/** Downloads the Linux environment (checked against its published checksum) and imports it as the app's own WSL distribution. */
+/** The person pressed "Install the Linux box": the newest published image, a first-time import. */
 export async function runnerInstall(): Promise<void> {
   if (!executor || installAbort) return;
   const ex = executor;
   const abort = new AbortController();
   installAbort = abort;
-  const downloadDir = join(app.getPath('userData'), 'runner-download');
-  const installDir = join(app.getPath('userData'), 'runner-distro');
   try {
     ex.setInstalling(0);
     const manifest = await fetchManifest(abort.signal);
-    const archive = await downloadRootfs(downloadDir, manifest, (p) => ex.setInstalling(p), abort.signal);
-    ex.setInstalling(99);
-    await fs.mkdir(installDir, { recursive: true });
-    await importDistro(app.isPackaged, installDir, archive);
-    await fs.rm(downloadDir, { recursive: true, force: true });
+    await installFromManifest(manifest, (p) => ex.setInstalling(p), abort.signal, false);
     ex.setInstalling(null);
     await ex.afterInstall(manifest.version);
   } catch (e) {
-    await fs.rm(downloadDir, { recursive: true, force: true }).catch(() => undefined);
     ex.reportError(e instanceof Error ? e.message : 'The install failed.');
   } finally {
     installAbort = null;

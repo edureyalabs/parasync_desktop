@@ -19,6 +19,9 @@ export interface DevicePatch {
   last_canary_at?: string;
   last_canary_ok?: boolean;
   last_canary_note?: string | null;
+  browser_ready?: boolean;
+  last_browser_canary_ok?: boolean;
+  last_browser_canary_note?: string | null;
 }
 
 export class SignedOutError extends Error {}
