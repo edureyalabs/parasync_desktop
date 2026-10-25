@@ -66,7 +66,7 @@ export const STATUS_TONE: Record<AccessStatus, 'neutral' | 'brass' | 'green' | '
 };
 
 // A tool the researcher suggested (table tool_proposals) and a tool already linked to the access (agent_created_tools with access_id set).
-export type ProposalStatus = 'proposed' | 'approved' | 'building' | 'built' | 'failed' | 'rejected';
+export type ProposalStatus = 'suggested' | 'approved' | 'building' | 'built' | 'failed' | 'proposed' | 'rejected';
 
 export interface ProposalInput {
   name: string;
@@ -80,6 +80,11 @@ export interface ToolProposal {
   name: string;
   title: string;
   summary: string;
+  kind: 'new' | 'upgrade';
+  target_tool: string | null;
+  motive: string | null;
+  est_runtime: string | null;
+  completed_at: string | null;
   runs_in: 'http' | 'page';
   inputs: ProposalInput[];
   returns: string | null;
