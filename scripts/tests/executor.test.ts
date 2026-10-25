@@ -28,7 +28,7 @@ function setup(opts: { wsl?: boolean; distro?: boolean; canary?: unknown; jobs?:
     distroInstalled: async () => opts.distro !== false,
     runJob: async (job) => {
       const j = job as { agent_id?: string };
-      if (j.agent_id === 'canary') return opts.canary === undefined ? { kind: 'result', result: { ok: true, result: 42 } } : (opts.canary as never);
+      if (j.agent_id === 'canary') return opts.canary === undefined ? { kind: 'result', result: { ok: true, result: { sum: 42, bad: [] } } } : (opts.canary as never);
       return { kind: 'result', result: (opts.run ? opts.run(job) : { ok: true, result: 1 }) as Record<string, unknown> };
     },
     getSetting: async (k) => settings.get(k) ?? null,
@@ -67,7 +67,7 @@ test('a passing self-test makes the device ready and tells the cloud', async () 
 });
 
 test('a failing self-test never becomes ready', async () => {
-  const { ex, devices } = setup({ canary: { kind: 'result', result: { ok: true, result: 41 } } });
+  const { ex, devices } = setup({ canary: { kind: 'result', result: { ok: true, result: { sum: 41, bad: [] } } } });
   await enable(ex);
   assert.equal(ex.getStatus().state, 'error');
   assert.ok(!devices.some((d) => d['ready'] === true));
@@ -161,4 +161,22 @@ test('signing out or switching accounts marks the previous account\'s device not
   await t.ex.setSession('user-2');
   assert.equal(t.devices.at(-1)?.['ready'], false);
   t.ex.stop();
+});
+
+test('a box that is not sealed never becomes ready, and says why', async () => {
+  const { ex, devices } = setup({ canary: { kind: 'result', result: { ok: true, result: { sum: 42, bad: ['windows-interop'] } } } });
+  await enable(ex);
+  assert.equal(ex.getStatus().state, 'error');
+  assert.match(ex.getStatus().message ?? '', /windows-interop/);
+  assert.ok(!devices.some((d) => d['ready'] === true));
+});
+
+test('each job starts as root only to lock interop, then runs as the unprivileged user via --exec', async () => {
+  const { jobArgs } = await import('../../src/main/runner/wsl.ts');
+  const args = jobArgs(120);
+  assert.deepEqual(args.slice(0, 6), ['-d', 'ParasyncRunner', '-u', 'root', '--exec', 'sh']);
+  const script = args[7] ?? '';
+  assert.match(script, /echo -1 > \/proc\/sys\/fs\/binfmt_misc\/WSLInterop/);
+  assert.match(script, /exec runuser -u runner -- env -u WSL_INTEROP timeout --signal=KILL 120 python3 \/opt\/runner\/run_job\.py/);
+  assert.ok(!script.includes('"'), 'no double quotes (Windows argument quoting)');
 });

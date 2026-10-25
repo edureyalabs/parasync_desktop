@@ -86,12 +86,25 @@ export async function unregisterDistro(packaged: boolean): Promise<void> {
   await run(wslBinary(packaged), ['--unregister', RUNNER_CONFIG.distro], { timeoutMs: 2 * 60_000 });
 }
 
+/**
+ * How one job is started. wsl.exe leaves Windows' "interop" switched on in this box whatever wsl.conf says (checked on a real PC),
+ * which would let code ask Windows to start a program. So each job starts as root for a moment, switches interop off and locks the
+ * interop sockets, then drops to the unprivileged user BEFORE any agent code exists. The user cannot switch it back on (needs root).
+ * `--exec` passes the script as one argument, so no shell re-parses it. No double quotes in the script: Windows quoting.
+ */
+export function jobArgs(limit: number): string[] {
+  const script =
+    'echo -1 > /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null; chmod 700 /run/WSL 2>/dev/null; ' +
+    `exec runuser -u runner -- env -u WSL_INTEROP timeout --signal=KILL ${limit} python3 /opt/runner/run_job.py`;
+  return ['-d', RUNNER_CONFIG.distro, '-u', 'root', '--exec', 'sh', '-c', script];
+}
+
 export type JobOutcome = { kind: 'result'; result: Record<string, unknown> } | { kind: 'failed'; message: string };
 
 /** Runs one job. `timeoutSeconds` is the call's own limit; the Linux side enforces it with `timeout`, and a little extra covers start-up. */
 export async function runJob(packaged: boolean, job: unknown, timeoutSeconds: number): Promise<JobOutcome> {
   const limit = Math.max(1, Math.min(Math.floor(timeoutSeconds), 900));
-  const args = ['-d', RUNNER_CONFIG.distro, '-u', 'runner', '--', 'timeout', '--signal=KILL', String(limit), 'python3', '/opt/runner/run_job.py'];
+  const args = jobArgs(limit);
   const r = await run(wslBinary(packaged), args, { input: JSON.stringify(job), timeoutMs: (limit + 30) * 1000 });
   if (r.timedOut) return { kind: 'failed', message: `The code did not finish within ${limit}s and was stopped.` };
   if (r.spawnError) return { kind: 'failed', message: `The Linux box could not be started: ${r.spawnError}` };

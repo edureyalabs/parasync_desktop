@@ -3,7 +3,7 @@
 // and only while that passes lets the cloud send work here. Work arrives as rows; each is claimed (first caller wins), run in the
 // Linux box as its own process, and answered. Nothing here knows about Electron: everything it touches is passed in, so it is tested
 // on its own (scripts/tests/executor.test.ts).
-import { RUNNER_CONFIG, type RunnerStatus } from '../../shared/runner';
+import { RUNNER_CONFIG, SEALED_CHECK_CODE, type RunnerStatus } from '../../shared/runner';
 import { SignedOutError, type Cloud } from './cloud';
 import type { JobOutcome } from './wsl';
 
@@ -159,9 +159,15 @@ export class Executor {
 
   private async canary(): Promise<boolean> {
     this.set({ ...this.status, state: 'checking' });
-    const outcome = await this.d.runJob({ mode: 'script', code: 'result = 6 * 7', agent_id: 'canary' }, 60);
-    const ok = outcome.kind === 'result' && outcome.result['ok'] === true && outcome.result['result'] === 42;
-    const note = ok ? null : (outcome.kind === 'failed' ? outcome.message : String(outcome.result['error'] ?? 'unexpected answer')).slice(0, 400);
+    const outcome = await this.d.runJob({ mode: 'script', code: SEALED_CHECK_CODE, agent_id: 'canary' }, 60);
+    const answer = outcome.kind === 'result' ? (outcome.result['result'] as { sum?: unknown; bad?: unknown } | null) : null;
+    const bad = Array.isArray(answer?.bad) ? (answer.bad as unknown[]).map(String) : null;
+    const ok = outcome.kind === 'result' && outcome.result['ok'] === true && answer?.sum === 42 && bad !== null && bad.length === 0;
+    const note = ok
+      ? null
+      : (outcome.kind === 'failed' ? outcome.message
+        : bad && bad.length > 0 ? `The Linux box is not sealed (${bad.join(', ')}), so tool runs stay in the cloud.`
+        : String(outcome.result['error'] ?? 'unexpected answer')).slice(0, 400);
     this.set({ ...this.status, state: ok ? 'ready' : 'error', message: ok ? undefined : `Self-test failed: ${note}`, lastCanaryAt: this.d.now().toISOString() });
     await this.heartbeat(ok, { last_canary_at: this.d.now().toISOString(), last_canary_ok: ok, last_canary_note: note }).catch(() => undefined);
     return ok;

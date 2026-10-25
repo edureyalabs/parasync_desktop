@@ -34,3 +34,29 @@ export interface RunnerStatus {
   lastCanaryAt?: string;
   jobsRun?: number;
 }
+
+/**
+ * The self-test script, run inside the Linux box as the same unprivileged user that runs agent code. It proves the box is sealed as
+ * promised: no Windows drives, no way to start Windows programs, not root. A PC is "ready" only while `bad` comes back empty.
+ */
+export const SEALED_CHECK_CODE = `
+import glob, getpass, os, shutil
+bad = []
+if os.path.exists('/mnt/c') or any(os.path.isdir(p) for p in glob.glob('/mnt/[a-z]')):
+    bad.append('windows-drives')
+try:
+    if open('/proc/sys/fs/binfmt_misc/WSLInterop').read().startswith('enabled'):
+        bad.append('windows-interop')
+except OSError:
+    pass
+try:
+    os.listdir('/run/WSL')
+    bad.append('interop-socket')
+except OSError:
+    pass
+if shutil.which('cmd.exe') or shutil.which('powershell.exe'):
+    bad.append('windows-path')
+if getpass.getuser() != 'runner' or os.getuid() == 0:
+    bad.append('not-unprivileged')
+result = {'sum': 6 * 7, 'bad': bad}
+`;

@@ -14,24 +14,16 @@ const checkout = process.env['PARASYNC_LOCALRUNNER'];
 function fake(): void {
   const dir = mkdtempSync(join(tmpdir(), 'fakewsl-'));
   const bin = join(dir, 'wsl.sh');
+  // Stand-in for: wsl.exe -d NAME -u root --exec sh -c SCRIPT. It runs the script as-is, minus the parts that only exist inside the
+  // real box (the runuser switch, the /opt path), so the job-start script itself is exercised.
   writeFileSync(bin, `#!/bin/sh
 case "$1" in
   --status) exit 0;;
   --list) printf 'ParasyncRunner\\n'; exit 0;;
 esac
-# -d NAME -u runner -- timeout --signal=KILL N python3 /opt/runner/run_job.py
-shift 5   # -d NAME -u runner --
-exec "$@" 
-`.replace('python3 /opt/runner/run_job.py', ''), { mode: 0o755 });
-  // Redirect the harness path to the checkout.
-  writeFileSync(bin, `#!/bin/sh
-case "$1" in
-  --status) exit 0;;
-  --list) printf 'ParasyncRunner\\n'; exit 0;;
-esac
-shift 5
-timeout_flag="$1"; sig="$2"; secs="$3"
-cd "${checkout}/runner" && exec timeout "$sig" "$secs" python3 "${checkout}/runner/run_job.py"
+script="$8"
+script=$(printf '%s' "$script" | sed -e 's#exec runuser -u runner -- env -u WSL_INTEROP #cd ${checkout}/runner \\&\\& exec #' -e 's#/opt/runner/run_job.py#${checkout}/runner/run_job.py#')
+exec sh -c "$script"
 `, { mode: 0o755 });
   chmodSync(bin, 0o755);
   process.env['PARASYNC_WSL_BIN'] = bin;
