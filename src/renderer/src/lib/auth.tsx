@@ -93,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNotice(null);
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: APP_CONFIG.googleReturn === 'web-bridge' ? `${APP_CONFIG.webUrl}${APP_CONFIG.bridgePath}` : APP_CONFIG.authCallback, skipBrowserRedirect: true, queryParams: { access_type: 'offline', prompt: 'consent' } },
+      options: { redirectTo: APP_CONFIG.googleReturn === 'web-bridge' ? `${APP_CONFIG.bridgeBase}${APP_CONFIG.bridgePath}` : APP_CONFIG.authCallback, skipBrowserRedirect: true, queryParams: { access_type: 'offline', prompt: 'consent' } },
     });
     if (error || !data.url) return error?.message ?? 'Could not start Google sign-in.';
     try {

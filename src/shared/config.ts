@@ -5,8 +5,12 @@
 export const APP_CONFIG = {
   supabaseUrl: 'https://eyufwzhxxfebncwaxgci.supabase.co',
   supabasePublishableKey: 'sb_publishable_nu3OggC4tEM85yobhHg5YQ__A-1X34u',
-  /** The web app, for things the desktop app does not do yet ("Open in web"). */
-  webUrl: 'https://parasync.in',
+  /**
+   * The web app, for things the desktop app does not do yet ("Open in web") and the address every /api call goes to.
+   * Must be the www address: parasync.in answers with a 308 redirect to www.parasync.in, and webApi.ts refuses redirects
+   * (it would otherwise carry the login token to wherever the redirect points), so the bare address makes every call fail.
+   */
+  webUrl: 'https://www.parasync.in',
   /** Deep link the system browser returns to after Google sign-in. Must be an allowed redirect URL in Supabase. */
   protocol: 'parasync',
   authCallback: 'parasync://auth/callback',
@@ -18,6 +22,8 @@ export const APP_CONFIG = {
    */
   googleReturn: 'web-bridge' as 'deep-link' | 'web-bridge',
   bridgePath: '/auth/desktop',
+  /** Host of the sign-in return page. Kept on the bare address because that is the one already listed in Supabase's Redirect URLs. */
+  bridgeBase: 'https://parasync.in',
   /** Hosts the app may open in the system browser for sign-in (Supabase's own host and Google). */
   oauthHosts: ['eyufwzhxxfebncwaxgci.supabase.co', 'accounts.google.com'],
 } as const;
