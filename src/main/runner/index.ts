@@ -40,7 +40,14 @@ export function startRunner(getWindow: () => BrowserWindow | null): void {
     },
     log: (message) => console.warn('[runner]', message),
   });
-  app.on('before-quit', () => executor?.stop());
+  // Quitting: say goodbye to the cloud first (at most 3 s), then actually quit.
+  let quitting = false;
+  app.on('before-quit', (event) => {
+    if (quitting || !executor) return;
+    event.preventDefault();
+    quitting = true;
+    void Promise.race([executor.goodbye(), new Promise((resolve) => setTimeout(resolve, 3_000))]).finally(() => app.quit());
+  });
 }
 
 export const runnerStatus = () => executor?.getStatus() ?? { state: 'off' as const, enabled: false };

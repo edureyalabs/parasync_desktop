@@ -180,3 +180,11 @@ test('each job starts as root only to lock interop, then runs as the unprivilege
   assert.match(script, /exec runuser -u runner -- env -u WSL_INTEROP timeout --signal=KILL 120 python3 \/opt\/runner\/run_job\.py/);
   assert.ok(!script.includes('"'), 'no double quotes (Windows argument quoting)');
 });
+
+test('quitting tells the cloud this PC is not ready', async () => {
+  const t = setup();
+  await enable(t.ex);
+  assert.equal(t.devices.at(-1)?.['ready'], true);
+  await t.ex.goodbye();
+  assert.equal(t.devices.at(-1)?.['ready'], false);
+});

@@ -93,6 +93,13 @@ export class Executor {
     if (percent !== null) this.set({ ...this.status, state: 'installing', percent });
   }
 
+  /** Called as the app quits: tell the cloud this PC is gone now, instead of leaving it "ready" until its check-in goes stale. */
+  async goodbye(): Promise<void> {
+    if (!this.userId || !this.status.enabled) return;
+    this.stop();
+    await this.heartbeat(false).catch(() => undefined);
+  }
+
   reportError(message: string): void {
     this.installing = false;
     this.set({ ...this.status, state: 'error', percent: undefined, message });
@@ -175,7 +182,10 @@ export class Executor {
 
   private async runOne(job: { id: string; payload: unknown; timeout_seconds: number }): Promise<void> {
     this.set({ ...this.status, state: 'busy' });
-    const keepAlive = setInterval(() => { void this.d.cloud.touch(job.id).catch(() => undefined); }, 30_000);
+    const keepAlive = setInterval(() => {
+      void this.d.cloud.touch(job.id).catch(() => undefined);
+      void this.heartbeat(true).catch(() => undefined); // a long job must not make this PC look gone
+    }, 30_000);
     let ok = false;
     let result: unknown = null;
     let error: string | null = null;
