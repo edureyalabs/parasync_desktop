@@ -3,9 +3,9 @@
 
 import { useState } from 'react';
 import { ChainRail } from '@/components/runsheet/ChainRail';
-import { CodeBlock } from '@/components/runsheet/CodeBlock';
-import { BRASS, GREEN, INK, LINE, MONO, MUTED, RED, SANS, SOFT } from '@/components/projects/tokens';
-import { beadsFor, caption, elapsed, isLive, jobTitle } from './jobModel';
+import { INK, LINE, MONO, MUTED, RED, SANS, SOFT } from '@/components/projects/tokens';
+import StepDetail from './StepDetail';
+import { beadsFor, caption, elapsed, ghostFor, isLive, jobTitle } from './jobModel';
 import type { AccessRef, BrowserJob, BrowserJobStep } from './types';
 
 // One Browser Access job opened whole: the same bead rail, then the step the owner clicked (what it was given and what came back). Read-only.
@@ -15,7 +15,8 @@ export default function JobPanel({ job, access, steps, onClose, onCancel }: {
   const live = isLive(job);
   const [selected, setSelected] = useState<string | null>(steps.length ? steps[steps.length - 1].id : null);
   const step = steps.find(s => s.id === selected) ?? null;
-  const beads = beadsFor(steps, live && job.status === 'running');
+  const beads = beadsFor(steps);
+  const ghost = ghostFor(job);
 
   return (
     <div onClick={e => { if (e.target === e.currentTarget) onClose(); }}
@@ -34,21 +35,11 @@ export default function JobPanel({ job, access, steps, onClose, onCancel }: {
         </div>
         <p style={{ fontSize: '0.8rem', color: job.status === 'failed' && job.error !== 'cancelled' ? RED : SOFT, margin: '0.8rem 0 0.9rem', lineHeight: 1.6 }}>{caption(job, steps)}</p>
 
-        {beads.length > 0
-          ? <ChainRail beads={beads} selectedId={selected} onSelect={setSelected} follow={live ? beads[beads.length - 1].id : null} ariaLabel={`${jobTitle(job, access)}, ${steps.length} steps`} />
+        {beads.length > 0 || ghost
+          ? <ChainRail beads={beads} ghost={ghost} selectedId={selected} onSelect={id => setSelected(cur => (cur === id ? null : id))} follow={ghost ? '__end__' : null} ariaLabel={`${jobTitle(job, access)}, ${steps.length} steps`} />
           : <p style={{ fontSize: '0.8rem', color: MUTED, margin: 0 }}>No steps yet.</p>}
 
-        {step && (
-          <div style={{ marginTop: '1rem', borderTop: `1px solid ${LINE}`, paddingTop: '0.8rem' }}>
-            <p style={{ fontSize: '0.85rem', color: INK, margin: '0 0 0.15rem', fontWeight: 500 }}>{step.title}</p>
-            <p style={{ fontFamily: MONO, fontSize: '0.64rem', margin: 0, color: step.status === 'failed' ? RED : step.kind === 'finish' ? GREEN : BRASS, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              step {step.step_number} · {step.status}
-            </p>
-            {step.input_excerpt && <CodeBlock label="Given" text={step.input_excerpt} />}
-            {step.output_excerpt && <CodeBlock label="Result" text={step.output_excerpt} maxHeight={340} />}
-            {step.error && <CodeBlock label="Error" text={step.error} tone="error" />}
-          </div>
-        )}
+        {step && <StepDetail step={step} />}
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 // components/browser-jobs/jobModel.ts
 // How a Browser Access job reads in the Runsheet: its name, what each step looks like as a bead, and the one-line caption under the rail.
 import { toolIconIfKnown } from '@/components/icons/toolIcons';
-import type { RailBead } from '@/components/runsheet/ChainRail';
+import type { RailBead, RailGhost } from '@/components/runsheet/ChainRail';
 import type { BeadState, GlyphKey } from '@/components/runsheet/tokens';
 import type { AccessRef, BrowserJob, BrowserJobStep } from './types';
 import { LIVE_STATUSES } from './types';
@@ -24,50 +24,71 @@ export function isLive(job: BrowserJob): boolean {
 }
 
 const GUIDE_WRITE = new Set(['write_site_guide', 'set_guide_overview']);
-const GUIDE_READ = new Set(['read_site_guide', 'read_node_learning', 'read_exploration_call']);
+const GUIDE_READ = new Set(['read_site_guide', 'read_node_learning', 'read_exploration_call', 'read_source_call', 'read_browser_call', 'read_tool']);
+const SAVES = new Set(['save_draft', 'submit_plan', 'submit_draft', 'pass_tool', 'send_back', 'suggest_tool', 'revise_suggestion']);
+const PHASE = /^(Study|Write|Verify) · (.+)$/;
+const PHASE_TONE: Record<string, 'plan' | 'repair' | 'neutral'> = { Study: 'plan', Write: 'neutral', Verify: 'repair' };
 
-/** The tool or action a step is about: the title up to the first colon. */
+/** A builder step's title is "Phase · what"; every other job's is just "what". */
+function parts(step: BrowserJobStep): { phase: string | null; rest: string } {
+  const m = PHASE.exec(step.title);
+  return m ? { phase: m[1], rest: m[2] } : { phase: null, rest: step.title };
+}
+
+/** The tool or action a step is about: the title (without its phase) up to the first colon. */
 function stepName(step: BrowserJobStep): string {
-  return step.title.split(':')[0].trim();
+  return parts(step).rest.split(':')[0].trim();
 }
 
 function glyphFor(step: BrowserJobStep): GlyphKey {
   const name = stepName(step).toLowerCase().replace(/ /g, '_');
+  const rest = parts(step).rest;
   if (step.kind === 'finish') return step.status === 'failed' ? 'cross' : 'finish';
+  if (name === 'plan') return 'plan';
   if (GUIDE_WRITE.has(name)) return 'replace';
   if (name === 'remove_site_guide' || name === 'remove_guide') return 'remove';
-  if (GUIDE_READ.has(name) || /^(reading|collected|read)/i.test(step.title)) return 'explore';
-  if (/^(propos|saved|building|tested|save|test)/i.test(step.title)) return 'add';
+  if (GUIDE_READ.has(name) || /^(reading|collected|read)/i.test(rest)) return 'explore';
+  if (SAVES.has(name) || /^(propos|saved|building|tested|save|test)/i.test(rest)) return 'add';
   return 'tool';
 }
 
-function stateFor(step: BrowserJobStep, isLastOfLiveJob: boolean): BeadState {
-  if (step.status === 'failed') return 'failed';
-  if (isLastOfLiveJob) return 'running';
-  return 'completed';
+function stateFor(step: BrowserJobStep): BeadState {
+  return step.status === 'failed' ? 'failed' : 'completed';
 }
 
 function shortLabel(step: BrowserJobStep): string {
+  const { rest } = parts(step);
   const name = stepName(step).replace(/^browser_access_.*/, 'open site');
-  const tail = step.title.includes(':') ? step.title.slice(step.title.indexOf(':') + 1).trim() : '';
-  const base = (tail || name).replace(/_/g, ' ');
+  const tail = rest.includes(':') ? rest.slice(rest.indexOf(':') + 1).trim() : '';
+  const base = (tail && !SAVES.has(name) && name !== 'run_draft' ? tail : name).replace(/_/g, ' ');
   return base.length > 18 ? base.slice(0, 17) + '…' : base;
 }
 
-export function beadsFor(steps: BrowserJobStep[], live: boolean): RailBead[] {
-  return steps.map((step, i) => {
+/** One bead per recorded step (a step is written when it is over). A builder's phases (Study, Write, Verify) each start a labelled section of the rail.
+ *  While the job is working, the rail ends with a "working" ghost bead: the live end. */
+export function beadsFor(steps: BrowserJobStep[]): RailBead[] {
+  let lastPhase: string | null = null;
+  return steps.map(step => {
     const name = stepName(step);
     const known = toolIconIfKnown(name);
+    const { phase } = parts(step);
+    const section = phase && phase !== lastPhase ? { label: phase, tone: PHASE_TONE[phase] ?? 'neutral' } : undefined;
+    if (phase) lastPhase = phase;
     return {
       id: step.id,
       label: shortLabel(step),
       sublabel: step.kind === 'finish' ? 'result' : undefined,
       glyph: glyphFor(step),
       icon: known ?? undefined,
-      state: stateFor(step, live && i === steps.length - 1),
+      section,
+      state: stateFor(step),
       title: step.title + (step.error ? ` — ${step.error}` : ''),
     };
   });
+}
+
+export function ghostFor(job: BrowserJob): RailGhost | null {
+  return job.status === 'running' ? { label: 'working', tone: 'building' } : null;
 }
 
 export function elapsed(job: BrowserJob): string {
@@ -85,7 +106,7 @@ export function caption(job: BrowserJob, steps: BrowserJobStep[]): string {
     return retry ? (job.error || 'Trying again shortly') : 'Waiting to start';
   }
   if (job.status === 'awaiting_credentials') return 'Waiting for the sign-in details';
-  if (job.status === 'running') return steps.length ? `Working: ${steps[steps.length - 1].title}` : 'Starting';
+  if (job.status === 'running') return steps.length ? `Working · after: ${steps[steps.length - 1].title}` : 'Starting';
   if (job.status === 'failed') return job.error === 'cancelled' ? 'Cancelled' : (job.error || 'Did not finish');
   const finish = [...steps].reverse().find(s => s.kind === 'finish');
   return finish?.output_excerpt?.split('\n')[0] || 'Finished';

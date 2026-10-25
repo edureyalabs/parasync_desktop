@@ -13,7 +13,7 @@
 //   * optional SECTIONS: a bead can start a labelled section (a planner pass) so several passes read as one continuous rail.
 //
 // It is purely presentational: callers pass beads and get clicks back.
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/icons/Icon';
 import type { ToolIconSpec } from '@/components/icons/toolIcons';
 import { Glyph } from './Glyphs';
@@ -48,8 +48,11 @@ interface Props {
   ghost?: RailGhost | null;
   selectedId?: string | null;
   onSelect?: (id: string) => void;
-  /** the bead to keep in view as the work moves along */
+  /** the bead to keep in view as the work moves along ('__end__' = the ghost bead at the end); null = nothing is live */
   follow?: string | null;
+  /** 'live' (default): the rail stays at its live end while work happens, and leaves the view alone once the person scrolls away.
+   *  'center': the old behaviour, the followed bead is centred every time it changes (used by the landing page's demo animation). */
+  followMode?: 'live' | 'center';
   ariaLabel: string;
 }
 
@@ -149,31 +152,143 @@ function labelColor(state: BeadState): string {
   return MUTED;
 }
 
-export function ChainRail({ beads, ghost, selectedId = null, onSelect, follow = null, ariaLabel }: Props) {
+// The room kept to the right of the live bead so its label (and the ghost that follows) stays readable.
+const LIVE_EDGE = 44;
+// How close to the far end counts as "at the live end".
+const AT_END_SLOP = 24;
+// Scroll events within this long of a wheel / touch / pointer / key action come from the person, not from the rail following the work.
+const USER_INTENT_MS = 450;
+
+export function ChainRail({ beads, ghost, selectedId = null, onSelect, follow = null, followMode = 'live', ariaLabel }: Props) {
   const d = DIM;
   const scroller = useRef<HTMLDivElement | null>(null);
+  // Whether the rail is following the live end. It starts true; it turns false only when the PERSON scrolls so the live bead is out of view, and
+  // true again when they scroll back to it (or press "Live"). Updates from the database never change it.
+  const pinnedRef = useRef(true);
+  const [pinned, setPinned] = useState(true);
+  const intentAt = useRef(0);
+  const pointerDown = useRef(false);
+  const mounted = useRef(false);
+  const anim = useRef<number | null>(null);
 
-  // Keep the bead that is moving in view -- the rail scrolls itself as the chain grows or the run advances.
+  const cancelAnim = useCallback(() => {
+    if (anim.current !== null) { cancelAnimationFrame(anim.current); anim.current = null; }
+  }, []);
+
+  // Our own short slide instead of `behavior: 'smooth'`: a browser's smooth scroll cannot be interrupted from script and can fight the person's own scrolling.
+  const slideTo = useCallback((el: HTMLElement, target: number) => {
+    cancelAnim();
+    const from = el.scrollLeft;
+    const dist = target - from;
+    if (Math.abs(dist) < 1) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { el.scrollLeft = target; return; }
+    const started = performance.now();
+    const duration = Math.min(320, 120 + Math.abs(dist) * 0.6);
+    const step = (now: number) => {
+      const t = Math.min(1, (now - started) / duration);
+      el.scrollLeft = from + dist * (1 - Math.pow(1 - t, 3));
+      anim.current = t < 1 ? requestAnimationFrame(step) : null;
+    };
+    anim.current = requestAnimationFrame(step);
+  }, [cancelAnim]);
+
+  useEffect(() => cancelAnim, [cancelAnim]);
+
+  const setPin = useCallback((value: boolean) => {
+    pinnedRef.current = value;
+    setPinned(value);
+  }, []);
+
+  /** Where the live bead sits in the scroller's own coordinates, or null when there is nothing live to look at. */
+  const liveBox = useCallback((): { left: number; right: number } | null => {
+    const el = scroller.current;
+    if (!el || !follow) return null;
+    const target = el.querySelector<HTMLElement>(`[data-bead-id="${CSS.escape(follow)}"]`) ?? el.querySelector<HTMLElement>('[data-bead-id="__end__"]');
+    if (!target) return { left: el.scrollWidth - el.clientWidth, right: el.scrollWidth - el.clientWidth };
+    const box = target.getBoundingClientRect();
+    const base = el.getBoundingClientRect();
+    return { left: box.left - base.left + el.scrollLeft, right: box.right - base.left + el.scrollLeft };
+  }, [follow]);
+
+  const goLive = useCallback((smooth: boolean) => {
+    const el = scroller.current;
+    const box = liveBox();
+    if (!el || !box) return;
+    const visible = box.left >= el.scrollLeft && box.right <= el.scrollLeft + el.clientWidth - LIVE_EDGE / 2;
+    if (visible) return;                                                          // already in view: the rail does not move
+    const left = Math.max(0, box.right + LIVE_EDGE - el.clientWidth);
+    if (smooth) slideTo(el, left);
+    else { cancelAnim(); el.scrollLeft = left; }
+  }, [liveBox, slideTo, cancelAnim]);
+
+  // Follow the work: when a node is added or the live node changes, bring it into view (only if the person has not scrolled away).
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const target = follow ? el.querySelector<HTMLElement>(`[data-bead-id="${CSS.escape(follow)}"]`) : null;
-    // No matching bead but something to follow = the ghost at the end of the rail.
-    const left = target ? target.offsetLeft + target.offsetWidth / 2 - el.clientWidth / 2 : follow ? el.scrollWidth : 0;
-    el.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
-  }, [follow, beads.length, ghost?.tone]);
+    const first = !mounted.current;
+    mounted.current = true;
+    if (followMode === 'center') {
+      const target = follow ? el.querySelector<HTMLElement>(`[data-bead-id="${CSS.escape(follow)}"]`) : null;
+      const left = target ? target.offsetLeft + target.offsetWidth / 2 - el.clientWidth / 2 : follow ? el.scrollWidth : 0;
+      el.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+      return;
+    }
+    if (!follow) return;
+    if (!pinnedRef.current && !first) return;
+    goLive(!first);
+  }, [follow, beads.length, ghost?.tone, ghost?.label, followMode, goLive]);
 
+  // Tell the person's own scrolling apart from the rail following the work.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || followMode === 'center') return;
+    const mark = () => { intentAt.current = performance.now(); cancelAnim(); };      // the person takes over: our slide stops at once
+    const down = () => { pointerDown.current = true; mark(); };
+    const up = () => { pointerDown.current = false; };
+    el.addEventListener('wheel', mark, { passive: true });
+    el.addEventListener('touchstart', mark, { passive: true });
+    el.addEventListener('touchmove', mark, { passive: true });
+    el.addEventListener('keydown', mark);
+    el.addEventListener('pointerdown', down);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    return () => {
+      el.removeEventListener('wheel', mark);
+      el.removeEventListener('touchstart', mark);
+      el.removeEventListener('touchmove', mark);
+      el.removeEventListener('keydown', mark);
+      el.removeEventListener('pointerdown', down);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+  }, [followMode, cancelAnim]);
+
+  const onScroll = () => {
+    const el = scroller.current;
+    if (!el || followMode === 'center' || !follow) return;
+    const byPerson = pointerDown.current || performance.now() - intentAt.current < USER_INTENT_MS;
+    if (!byPerson) return;
+    const atEnd = el.scrollWidth - el.scrollLeft - el.clientWidth <= AT_END_SLOP;
+    const box = liveBox();
+    const inView = !!box && box.right > el.scrollLeft && box.left < el.scrollLeft + el.clientWidth;
+    setPin(atEnd || inView);
+  };
+
+  // Work is happening right now (a node running or being repaired, or the planner adding the next one): only then is there a "live end" to jump back to.
+  const liveNow = !!follow && (ghost?.tone === 'building' || beads.some(b => b.state === 'running' || b.state === 'recovering'));
   const hasSections = beads.some(b => b.section);
   const kinds: SegmentKind[] = beads.map((b, i) => segmentKind(b, i + 1 < beads.length ? beads[i + 1] : 'ghost'));
 
   return (
+    <div style={{ position: 'relative', minWidth: 0, maxWidth: '100%' }}>
     <div
       ref={scroller}
       className="rs-rail"
       role="group"
       aria-label={ariaLabel}
+      onScroll={onScroll}
       style={{
-        display: 'flex', alignItems: 'flex-start', overflowX: 'auto', padding: '6px 2px 3px',
+        display: 'flex', alignItems: 'flex-start', overflowX: 'auto', padding: '6px 2px 3px', overflowAnchor: 'none',
         WebkitMaskImage: 'linear-gradient(90deg, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%)',
         maskImage: 'linear-gradient(90deg, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%)',
       }}
@@ -217,7 +332,7 @@ export function ChainRail({ beads, ghost, selectedId = null, onSelect, follow = 
       })}
 
       {ghost && (
-        <div style={{ flex: 'none', width: d.cell, paddingTop: hasSections ? d.section : 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <div data-bead-id="__end__" style={{ flex: 'none', width: d.cell, paddingTop: hasSections ? d.section : 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', width: '100%', height: d.bead }}>
             <HalfLine kind={beads.length ? 'build' : null} height={d.line} />
             <span
@@ -252,6 +367,23 @@ export function ChainRail({ beads, ghost, selectedId = null, onSelect, follow = 
           </span>
         </div>
       )}
+    </div>
+    {liveNow && followMode !== 'center' && !pinned && (
+      <button
+        type="button"
+        onClick={() => { setPin(true); goLive(true); }}
+        aria-label="Jump to where the work is happening now"
+        style={{
+          position: 'absolute', top: 4, right: 4, zIndex: 2, display: 'inline-flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer',
+          fontFamily: "'IBM Plex Mono', monospace", fontSize: '0.58rem', letterSpacing: '0.05em', textTransform: 'uppercase', color: '#A17F3A',
+          background: '#FBF6E7', border: '1px solid #E4D3A1', borderRadius: 999, padding: '0.18rem 0.5rem', boxShadow: '0 1px 4px rgba(38,37,30,.12)',
+        }}
+      >
+        <span className="rs-anim" style={{ width: 5, height: 5, borderRadius: '50%', background: '#C9A24D', animation: 'rsBreathe 1.2s ease-in-out infinite' }} />
+        Live
+        <svg width="8" height="8" viewBox="0 0 9 9" fill="none"><path d="M2 1l4.5 3.5L2 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      </button>
+    )}
     </div>
   );
 }

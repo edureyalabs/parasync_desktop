@@ -30,11 +30,12 @@ export interface BrowserJobStep {
   input_excerpt: string | null;
   output_excerpt: string | null;
   error: string | null;
+  note: string | null;
   created_at: string;
 }
 
 export interface AccessRef { id: string; name: string; label: string | null; host: string | null }
 
 export const JOB_COLUMNS = 'id, access_id, kind, status, error, started_at, ended_at, last_heartbeat_at, trigger, attempts, next_attempt_at, scope';
-export const STEP_COLUMNS = 'id, run_id, step_number, kind, title, status, input_excerpt, output_excerpt, error, created_at';
+export const STEP_COLUMNS = 'id, run_id, step_number, kind, title, status, input_excerpt, output_excerpt, error, note, created_at';
 export const LIVE_STATUSES: JobStatus[] = ['queued', 'running', 'awaiting_credentials'];
