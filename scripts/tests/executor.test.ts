@@ -153,3 +153,12 @@ test('a failing device registration does not stop the loop and is not retried on
   // the self-test registers once (it fails quietly); the poll registers at most once more inside the 10 s window
   assert.ok(attempts >= 1 && attempts <= 3, `registered ${attempts} times`);
 });
+
+test('signing out or switching accounts marks the previous account\'s device not ready', async () => {
+  const t = setup();
+  await enable(t.ex);
+  assert.equal(t.devices.at(-1)?.['ready'], true);
+  await t.ex.setSession('user-2');
+  assert.equal(t.devices.at(-1)?.['ready'], false);
+  t.ex.stop();
+});

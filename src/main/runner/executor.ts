@@ -45,6 +45,11 @@ export class Executor {
   /** Called when the person signs in or out, and every time their token is renewed. */
   async setSession(userId: string | null): Promise<void> {
     const changed = userId !== this.userId;
+    if (changed && this.userId && this.status.enabled) {
+      // Signing out, or switching to another account: tell the cloud this account's PC is no longer taking work, so its runs go
+      // to the cloud at once instead of waiting for the check-in to go stale. (Best effort: the old token is still held here.)
+      await this.heartbeat(false).catch(() => undefined);
+    }
     this.userId = userId;
     if (!userId) {
       this.set({ state: 'off', enabled: false });

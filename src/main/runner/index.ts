@@ -49,10 +49,15 @@ export async function runnerSession(userId: unknown, accessToken: unknown): Prom
   if (!executor) return;
   const validToken = typeof accessToken === 'string' && /^[A-Za-z0-9._-]{20,4096}$/.test(accessToken) ? accessToken : null;
   const validUser = typeof userId === 'string' && /^[0-9a-f-]{36}$/i.test(userId) && validToken ? userId : null;
-  token = validUser ? validToken : null; // the token is renewed by the page; it is only ever kept in memory
-  if (validUser === userIdNow) return;
+  if (validUser === userIdNow) {
+    token = validUser ? validToken : null; // the token is renewed by the page; it is only ever kept in memory
+    return;
+  }
   userIdNow = validUser;
-  await executor.setSession(validUser);
+  // Switching or signing out: the executor still needs the OLD token for its goodbye call, so replace it only afterwards.
+  if (!validUser) await executor.setSession(null);
+  token = validUser ? validToken : null;
+  if (validUser) await executor.setSession(validUser);
 }
 
 export async function runnerSetEnabled(enabled: unknown): Promise<void> {
