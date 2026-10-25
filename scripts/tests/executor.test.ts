@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { BrowserHosts, type HostProcess } from '../../src/main/runner/browserHost.ts';
-import { Executor, type BrowserApi, type ExecutorDeps, type UpdateApi } from '../../src/main/runner/executor.ts';
+import { Executor, type BrowserApi, type ExecutorDeps, type UpdateApi, type VaultApi } from '../../src/main/runner/executor.ts';
 import type { Cloud, JobRow } from '../../src/main/runner/cloud.ts';
 import { browserHostArgs, decodeWslText } from '../../src/main/runner/wsl.ts';
 import { parseManifest } from '../../src/main/runner/install.ts';
@@ -20,6 +20,7 @@ interface SetupOpts {
   version?: string;
   browser?: BrowserApi;
   update?: UpdateApi;
+  vault?: VaultApi;
 }
 
 function setup(opts: SetupOpts = {}) {
@@ -27,14 +28,16 @@ function setup(opts: SetupOpts = {}) {
   if (opts.version) settings.set('runner.version', opts.version);
   const devices: Record<string, unknown>[] = [];
   const finished: { id: string; ok: boolean; result: unknown; error: string | null }[] = [];
+  const ran: { job: unknown; broker: unknown }[] = [];
   const statuses: RunnerStatus[] = [];
   let queue = [...(opts.jobs ?? [])];
+  const pushed: JobRow[] = [];
   const cloud: Cloud = {
     async saveDevice(_id, _u, patch) { devices.push(patch as Record<string, unknown>); },
     async queuedJobs() { const q = queue; queue = []; return q; },
     async claim(id) {
       if (opts.claimWins === false) return null;
-      const queued = (opts.jobs ?? []).find((j) => j.id === id);
+      const queued = [...(opts.jobs ?? []), ...pushed].find((j) => j.id === id);
       const payload = queued && Object.keys(queued.payload as object).length > 0 ? queued.payload : { code: 'x', mode: 'script' };
       return { id, agent_id: 'a', payload, timeout_seconds: 30 };
     },
@@ -45,13 +48,15 @@ function setup(opts: SetupOpts = {}) {
     cloud,
     wslAvailable: async () => opts.wsl !== false,
     distroInstalled: async () => opts.distro !== false,
-    runJob: async (job) => {
+    runJob: async (job, _seconds, broker) => {
+      ran.push({ job, broker });
       const j = job as { agent_id?: string };
       if (j.agent_id === 'canary') return opts.canary === undefined ? { kind: 'result', result: { ok: true, result: { sum: 42, bad: [] } } } : (opts.canary as never);
       return { kind: 'result', result: (opts.run ? opts.run(job) : { ok: true, result: 1 }) as Record<string, unknown> };
     },
     browser: opts.browser,
     update: opts.update,
+    vault: opts.vault,
     getSetting: async (k) => settings.get(k) ?? null,
     setSetting: async (k, v) => { settings.set(k, v); },
     newId: () => 'dev-1',
@@ -62,7 +67,7 @@ function setup(opts: SetupOpts = {}) {
     log: () => undefined,
   };
   const ex = new Executor(deps);
-  return { ex, devices, finished, statuses, settings };
+  return { ex, devices, finished, statuses, settings, ran, push: (...jobs: JobRow[]) => { pushed.push(...jobs); queue.push(...jobs); } };
 }
 
 async function enable(ex: Executor) {
@@ -249,6 +254,15 @@ test('two jobs run at the same time, and both are answered', async () => {
   await enable(t.ex);
   assert.equal(peak, 2);
   assert.equal(t.finished.length, 2);
+});
+
+test('a job with secrets for the broker starts through the root-owned supervisor, which starts the script itself as the unprivileged user', async () => {
+  const { jobArgs } = await import('../../src/main/runner/wsl.ts');
+  const script = jobArgs(120, true)[7] ?? '';
+  assert.match(script, /echo -1 > \/proc\/sys\/fs\/binfmt_misc\/WSLInterop/);
+  assert.match(script, /exec timeout --signal=KILL 140 python3 \/opt\/runner\/job_supervisor\.py 120$/);
+  assert.ok(!script.includes('runuser'), 'the supervisor does the privilege drop, not the shell');
+  assert.ok(!script.includes('"'));
 });
 
 test('browser jobs: open, exec and close drive the browser and are answered', async () => {
@@ -445,4 +459,175 @@ test('the browser host starts like a job: interop locked as root, then the unpri
   assert.match(script, new RegExp(`exec runuser -u runner -- env -u WSL_INTEROP PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers python3 /opt/runner/browser_host\\.py ${SID}`));
   assert.ok(!script.includes('"'));
   assert.throws(() => browserHostArgs('x; rm -rf /'));
+});
+
+
+// ── secrets held on this PC ────────────────────────────────────────────────────────────
+
+const AGENT = '11111111-1111-4111-8111-111111111111';
+const ACCESS = '22222222-2222-4222-8222-222222222222';
+
+/** A vault with fixed contents: key "agent|kind|name" -> value, version, hosts. Supplies a ref only when its version matches. */
+function fakeVault(entries: Record<string, { value: string; version: number; hosts?: string[]; deviceOnly?: boolean }>): VaultApi & { resolved: string[][] } {
+  const resolved: string[][] = [];
+  return {
+    resolved,
+    held: async () => ({}),
+    resolve: async (_u, wanted) => {
+      const values = new Map<string, { value: string; hosts: string[] }>();
+      const missing: { agentId: string; kind: 'secret' | 'user_secret' | 'browser_access'; name: string }[] = [];
+      resolved.push(wanted.map((w) => w.name));
+      for (const w of wanted) {
+        const k = `${w.agentId}|${w.kind}|${w.name}`;
+        const e = entries[k];
+        if (!e || (!e.deviceOnly && w.version !== undefined && e.version !== w.version)) { missing.push({ agentId: w.agentId, kind: w.kind, name: w.name }); continue; }
+        values.set(k, { value: e.value, hosts: e.hosts ?? [] });
+      }
+      return { values, missing };
+    },
+  };
+}
+
+const withSecrets = (extra: Record<string, unknown>, more: Record<string, unknown> = {}) => ({ code: 'x', mode: 'function', env_vars: {}, local_secrets: { agent_id: AGENT, ...extra }, ...more });
+
+test('a job that names secrets gets them from this PC as environment variables, and they are blanked from the answer', async () => {
+  const vault = fakeVault({ [`${AGENT}|secret|API_KEY`]: { value: 'sk-live-abcdef123456', version: 3 } });
+  const t = setup({
+    vault,
+    jobs: [{ id: 'j1', agent_id: 'a', payload: withSecrets({ env: [{ kind: 'secret', name: 'API_KEY', version: 3 }] }), timeout_seconds: 30 }],
+    run: () => ({ ok: true, result: 'sent with sk-live-abcdef123456', stdout: 'key sk-live-abcdef123456', output_files: { 'a.txt': 'c2stbGl2ZS1hYmNkZWYxMjM0NTY=' } }),
+  });
+  await enable(t.ex);
+  const job = t.ran.find((r) => (r.job as { code?: string }).code === 'x')!.job as Record<string, unknown>;
+  assert.deepEqual(job['env_vars'], { API_KEY: 'sk-live-abcdef123456' });
+  assert.ok(!('local_secrets' in job), 'the request itself is not passed on to the script');
+  const answer = t.finished[0]!.result as Record<string, unknown>;
+  assert.equal(answer['result'], 'sent with [REDACTED]');
+  assert.equal(answer['stdout'], 'key [REDACTED]');
+  assert.ok(!JSON.stringify(answer).includes('abcdef123456'.slice(0, 6) + 'x'), 'sanity');
+  assert.deepEqual(answer['output_files'], { 'a.txt': 'c2stbGl2ZS1hYmNkZWYxMjM0NTY=' }, 'output files are left alone');
+});
+
+test('a free-form script is never handed a raw secret, even if the request asks for one', async () => {
+  const vault = fakeVault({ [`${AGENT}|secret|API_KEY`]: { value: 'sk-live-abcdef123456', version: 3 } });
+  const t = setup({ vault, jobs: [{ id: 'j', agent_id: 'a', payload: withSecrets({ env: [{ kind: 'secret', name: 'API_KEY', version: 3 }] }, { mode: 'script' }), timeout_seconds: 30 }] });
+  await enable(t.ex);
+  assert.equal(t.ran.filter((r) => (r.job as { code?: string }).code === 'x').length, 0);
+  const result = t.finished[0]!.result as Record<string, unknown>;
+  assert.equal(result['not_run'], true);
+  assert.match(String(result['error']), /saved tools/);
+  assert.deepEqual(vault.resolved, [], 'the vault was not even asked');
+});
+
+test('a secret this PC does not hold, or holds an old copy of, refuses the job BEFORE any code runs', async () => {
+  const vault = fakeVault({ [`${AGENT}|secret|API_KEY`]: { value: 'old-value-1234', version: 2 } });
+  const t = setup({
+    vault,
+    jobs: [
+      { id: 'a', agent_id: 'a', payload: withSecrets({ env: [{ kind: 'secret', name: 'API_KEY', version: 3 }] }), timeout_seconds: 30 },
+      { id: 'b', agent_id: 'a', payload: withSecrets({ env: [{ kind: 'secret', name: 'NOT_HERE' }] }), timeout_seconds: 30 },
+    ],
+  });
+  await enable(t.ex);
+  assert.equal(t.ran.filter((r) => (r.job as { code?: string }).code === 'x').length, 0, 'no code ran');
+  for (const f of t.finished) {
+    assert.equal(f.ok, false);
+    assert.equal((f.result as Record<string, unknown>)['not_run'], true);
+    assert.ok(!JSON.stringify(f.result).includes('old-value-1234'));
+  }
+  assert.match(String((t.finished.find((f) => f.id === 'a')!.result as Record<string, unknown>)['error']), /API_KEY/);
+});
+
+test('a malformed secrets request is refused, never run: bad names, program-changing names, duplicate names, a non-https cloud broker', async () => {
+  const vault = fakeVault({});
+  const bad = [
+    { env: [{ kind: 'secret', name: 'lower' }] },
+    { env: [{ kind: 'secret', name: 'LD_PRELOAD' }] },
+    { env: [{ kind: 'secret', name: 'PARASYNC_BROKER_URL' }] },
+    { env: [{ kind: 'secret', name: 'A_KEY' }, { kind: 'user_secret', name: 'A_KEY' }] },
+  ];
+  const t = setup({ vault, version: '0.3.0', jobs: bad.map((b, i) => ({ id: `j${i}`, agent_id: 'a', payload: withSecrets(b), timeout_seconds: 30 })) });
+  await enable(t.ex);
+  assert.equal(t.ran.filter((r) => (r.job as { code?: string }).code === 'x').length, 0);
+  assert.equal(t.finished.length, bad.length);
+  assert.ok(t.finished.every((f) => !f.ok && (f.result as Record<string, unknown>)['not_run'] === true));
+});
+
+test('more malformed requests: a saved login in an env list, a non-https cloud broker', async () => {
+  const bad = [
+    { env: [{ kind: 'browser_access', name: ACCESS }] },
+    { broker: { names: [], cloud: { url: 'http://insecure.example.com', token: 'abcdefghijklmnop1234' } } },
+  ];
+  const t = setup({ vault: fakeVault({}), version: '0.3.0', jobs: bad.map((b, i) => ({ id: `j${i}`, agent_id: 'a', payload: withSecrets(b), timeout_seconds: 30 })) });
+  await enable(t.ex);
+  assert.equal(t.ran.filter((r) => (r.job as { code?: string }).code === 'x').length, 0);
+  assert.ok(t.finished.length === 2 && t.finished.every((f) => !f.ok && (f.result as Record<string, unknown>)['not_run'] === true));
+});
+
+test('secrets for the local broker need a Linux box that has it, and go to the box separately from the script\'s environment', async () => {
+  const entries = { [`${AGENT}|secret|API_KEY`]: { value: 'broker-only-value-99', version: 1, hosts: ['api.example.com'], deviceOnly: true } };
+  const spec = { broker: { names: [{ kind: 'secret', name: 'API_KEY', hosts: [] }], cloud: { url: 'https://bemain.example.com', token: 'abcdefghijklmnop1234' } } };
+  const old = setup({ vault: fakeVault(entries), version: '0.2.0', jobs: [{ id: 'j', agent_id: 'a', payload: withSecrets(spec), timeout_seconds: 30 }] });
+  await enable(old.ex);
+  assert.match(String((old.finished[0]!.result as Record<string, unknown>)['error']), /update/);
+  assert.equal(old.ran.filter((r) => (r.job as { code?: string }).code === 'x').length, 0);
+
+  const fresh = setup({ vault: fakeVault(entries), version: '0.3.0', jobs: [{ id: 'j', agent_id: 'a', payload: withSecrets(spec), timeout_seconds: 30 }], run: () => ({ ok: true, result: 'used broker-only-value-99' }) });
+  await enable(fresh.ex);
+  const r = fresh.ran.find((x) => (x.job as { code?: string }).code === 'x')!;
+  assert.deepEqual((r.job as Record<string, unknown>)['env_vars'], {}, 'the value is NOT in the script environment');
+  assert.deepEqual(r.broker, { secrets: [{ name: 'API_KEY', value: 'broker-only-value-99', hosts: ['api.example.com'] }], cloud: { url: 'https://bemain.example.com', token: 'abcdefghijklmnop1234' } });
+  assert.equal((fresh.finished[0]!.result as Record<string, unknown>)['result'], 'used [REDACTED]');
+});
+
+test('the heartbeat tells the cloud the NAMES this PC holds, never values', async () => {
+  const vault = fakeVault({});
+  vault.held = async () => ({ [AGENT]: { secret: { API_KEY: 3 } } });
+  const t = setup({ vault });
+  await enable(t.ex);
+  const beat = t.devices.find((d) => d['held_secrets']);
+  assert.deepEqual(beat?.['held_secrets'], { [AGENT]: { secret: { API_KEY: 3 } } });
+  t.ex.notifyHeldChanged(); // adding a secret makes the next poll report at once
+  t.ex.stop();
+});
+
+test('a browser call with a saved login gets it as PARASYNC_CREDS only for that call; the session is scrubbed from then on', async () => {
+  const vault = fakeVault({ [`${AGENT}|browser_access|${ACCESS}`]: { value: JSON.stringify({ username: 'boss@acme.com', password: 'p4ssw0rd-long' }), version: 2 } });
+  const seen: Record<string, string>[] = [];
+  const { api } = fakeBrowser({
+    exec: async (_id, request) => {
+      seen.push(request.env_vars);
+      if (request.code === 'login') return { ok: true, result: { ok: true, url: 'https://acme.test/home', note: 'welcome boss@acme.com' }, stdout: '', output_files: {} };
+      if (request.code === 'probe') return { ok: true, result: { values: ['cookie-session-value-123456', 'short'] }, stdout: '' };
+      return { ok: true, result: { page: 'user cookie-session-value-123456 and p4ssw0rd-long', jwt: 'eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4' }, stdout: '' };
+    },
+  });
+  const login = { kind: 'browser_exec', session_id: SID, code: 'login', files: {}, timeout: 30, local_secrets: { agent_id: AGENT, credentials: { access_id: ACCESS, version: 2 } } };
+  const probe = { kind: 'browser_exec', session_id: SID, code: 'probe', files: {}, timeout: 30, learn_values: true };
+  const later = { kind: 'browser_exec', session_id: SID, code: 'read page', files: {}, timeout: 30 };
+  const t = setup({ version: '0.3.0', browser: api, vault, jobs: [{ id: 'l', agent_id: null, payload: login, timeout_seconds: 60 }] });
+  await enable(t.ex);
+  for (const [id, payload] of [['p', probe], ['r', later]] as const) {
+    t.push({ id, agent_id: null, payload, timeout_seconds: 60 });
+    await t.ex.tick();
+    await t.ex.drain();
+  }
+  t.ex.stop();
+  const byId = Object.fromEntries(t.finished.map((f) => [f.id, f]));
+  assert.equal(JSON.parse(seen[0]!['PARASYNC_CREDS']!).password, 'p4ssw0rd-long', 'the login script gets the login');
+  assert.deepEqual(seen.slice(1), [{}, {}], 'later calls get nothing');
+  assert.match(String((byId['l']!.result as { result: { note: string } }).result.note), /welcome \[REDACTED\]/);
+  assert.deepEqual((byId['p']!.result as { result: unknown }).result, { learned: 1 }, 'only the count of noted session values goes back');
+  const page = (byId['r']!.result as { result: { page: string; jwt: string } }).result;
+  assert.equal(page.page, 'user [REDACTED] and [REDACTED]');
+  assert.equal(page.jwt, '[REDACTED]');
+});
+
+test('a browser call asking for the local broker is refused (it is for code runs only)', async () => {
+  const { api, calls } = fakeBrowser();
+  const spec = { broker: { names: [{ kind: 'secret', name: 'API_KEY', hosts: [] }], cloud: null } };
+  const t = setup({ version: '0.3.0', browser: api, vault: fakeVault({}), jobs: [{ id: 'e', agent_id: null, payload: { kind: 'browser_exec', session_id: SID, code: 'x', local_secrets: { agent_id: AGENT, ...spec } }, timeout_seconds: 60 }] });
+  await enable(t.ex);
+  assert.equal(t.finished[0]!.ok, false);
+  assert.ok(!calls.some((c) => c.startsWith('exec:')));
 });

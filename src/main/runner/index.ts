@@ -10,6 +10,8 @@ import { join } from 'node:path';
 import { APP_CONFIG } from '../../shared/config';
 import { IPC } from '../../shared/ipc';
 import { getItem, setItem } from '../secureStore';
+import { setSessionToken, setSessionUser } from '../session';
+import { startVault } from '../vault';
 import { BrowserHosts } from './browserHost';
 import { createCloud } from './cloud';
 import { Executor, type BrowserApi } from './executor';
@@ -70,11 +72,18 @@ export function startRunner(getWindow: () => BrowserWindow | null): void {
     },
   };
 
+  // The secrets this PC holds. When one is added or removed the cloud is told within a moment, so it knows what this PC can run.
+  const vault = startVault(() => executor?.notifyHeldChanged());
+
   executor = new Executor({
+    vault: {
+      held: (userId) => vault.held(userId),
+      resolve: (userId, wanted) => vault.resolve(userId, wanted),
+    },
     cloud: createCloud(APP_CONFIG.supabaseUrl, APP_CONFIG.supabasePublishableKey, () => token),
     wslAvailable: async () => windows && wslAvailable(packaged),
     distroInstalled: async () => windows && distroInstalled(packaged),
-    runJob: (job, seconds) => runJob(packaged, job, seconds),
+    runJob: (job, seconds, broker) => runJob(packaged, job, seconds, broker),
     browser,
     update: {
       latest: async () => (await fetchManifest(AbortSignal.timeout(20_000))).version,
@@ -115,12 +124,15 @@ export async function runnerSession(userId: unknown, accessToken: unknown): Prom
   const validUser = typeof userId === 'string' && /^[0-9a-f-]{36}$/i.test(userId) && validToken ? userId : null;
   if (validUser === userIdNow) {
     token = validUser ? validToken : null; // the token is renewed by the page; it is only ever kept in memory
+    setSessionToken(token);
     return;
   }
   userIdNow = validUser;
+  setSessionUser(validUser);
   // Switching or signing out: the executor still needs the OLD token for its goodbye call, so replace it only afterwards.
   if (!validUser) await executor.setSession(null);
   token = validUser ? validToken : null;
+  setSessionToken(token);
   if (validUser) await executor.setSession(validUser);
 }
 

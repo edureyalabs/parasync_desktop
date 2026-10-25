@@ -20,6 +20,8 @@ export const RUNNER_CONFIG = {
   /** How often to look for a newer Linux image, and the first image version that has a browser. */
   updateCheckEveryMs: 6 * 60 * 60_000,
   minBrowserRunner: '0.2.0',
+  /** The first Linux image that can hold secrets away from the script (the local broker). */
+  minBrokerRunner: '0.3.0',
   /** Most browsers one PC keeps open at once, and most jobs it runs at once. */
   maxBrowserSessions: 3,
   maxParallelJobs: 4,
@@ -37,6 +39,7 @@ export function compareVersions(a: string, b: string): number {
 }
 
 export const runnerHasBrowser = (version: string | null): boolean => !!version && compareVersions(version, RUNNER_CONFIG.minBrowserRunner) >= 0;
+export const runnerHasBroker = (version: string | null): boolean => !!version && compareVersions(version, RUNNER_CONFIG.minBrokerRunner) >= 0;
 
 export type RunnerState =
   | 'off'            // the person has not switched it on

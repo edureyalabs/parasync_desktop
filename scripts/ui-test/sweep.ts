@@ -25,38 +25,40 @@ const api = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
   if (u.pathname === '/api/platform-tools') return j(200, { tools: [{ key: 'code_executor', name: 'Code executor', description: 'Run Python in an isolated sandbox.' }, { key: 'send_email', name: 'Send email', description: 'Email from the agent\'s own address.' }, { key: 'create_excel', name: 'Excel documents', description: 'Create and edit spreadsheets.' }] });
   if (u.pathname === '/api/signed-apis') return j(200, { providers: [{ key: 'aws', name: 'Amazon Athena', description: 'Run SQL on S3 data.', fields: [{ name: 'access_key_id', label: 'Access key ID', required: true, secret: true }, { name: 'region', label: 'Region', required: true, secret: false }], actions: [{ name: 'athena_run_query', description: 'Run a SQL query' }] }, { key: 'snowflake', name: 'Snowflake', description: 'Run SQL.', fields: [], actions: [{ name: 'run_sql_query', description: 'Run SQL' }] }] });
-  if (u.pathname === '/api/agents/a1/network') return j(200, { ok: true, connections: [{ id: 'c1', status: 'active', source: 'invite', connected_at: iso(9000), email: 'priya@zenith.co', usage: { calls: 42, cost: 1.2345, lastActive: iso(30) }, tasks: { open: 2, recurring: 1 } }], total: 1, active: 1, paused: 0, totals: { calls: 42, cost: 1.2345 }, windowDays: 30, hasMore: false });
-  if (u.pathname === '/api/agents/a1/workspace/list') return u.searchParams.get('project')
+  if (u.pathname === '/api/agents/22222222-2222-4222-8222-2222222222a1/network') return j(200, { ok: true, connections: [{ id: 'c1', status: 'active', source: 'invite', connected_at: iso(9000), email: 'priya@zenith.co', usage: { calls: 42, cost: 1.2345, lastActive: iso(30) }, tasks: { open: 2, recurring: 1 } }], total: 1, active: 1, paused: 0, totals: { calls: 42, cost: 1.2345 }, windowDays: 30, hasMore: false });
+  if (u.pathname === '/api/agents/22222222-2222-4222-8222-2222222222a1/workspace/list') return u.searchParams.get('project')
     ? j(200, { ok: true, files: [{ path: 'weekly-reports/stock-summary.xlsx', purpose: 'Weekly stock summary', tags: null, project: 'weekly-reports', is_generated_document: true, is_user_upload: false, file_size_bytes: 20480, mime_type: 'x', updated_at: iso(60) }] })
     : j(200, { ok: true, projects: [{ slug: 'weekly-reports', purpose: 'Stock summaries for the buyers', updated_at: iso(60), file_count: 1 }] });
+  if (req.method === 'POST' && /\/api\/agents\/22222222-2222-4222-8222-2222222222a1\/secrets$/.test(u.pathname)) return j(200, { ok: true, name: 'API_KEY', version: 2, storage: 'cloud' });
+  if (req.method === 'POST' && /\/secrets\/verify$/.test(u.pathname)) return j(200, { ok: true, exists: true, match: true, version: 2, storage: 'cloud' });
   j(404, { error: 'nope' });
 });
 
 // ── fake Supabase REST ──
 const T = {
-  organizations: [{ id: 'o1', name: 'Acme Herbals', description: 'Herbal supplements', owner_id: 'u1', slug: 'acme', created_at: iso(90000), timezone: 'Asia/Kolkata' }],
+  organizations: [{ id: 'o1', name: 'Acme Herbals', description: 'Herbal supplements', owner_id: '11111111-1111-4111-8111-1111111111aa', slug: 'acme', created_at: iso(90000), timezone: 'Asia/Kolkata' }],
   agents: [
-    { id: 'a1', org_id: 'o1', name: 'Inventory Agent', description: 'Watches stock levels', goal: 'Keep stock healthy', role: 'Inventory analyst', backstory: 'You are careful and exact.', bio: 'online', active: true, visibility: 'private', is_verified: false, avatar_url: null, handle: 'ag-k7m2x9qd', billing_mode: 'owner_pays', created_at: iso(50000), agent_subscriptions: { current_period_end: new Date(now + 20 * 86400000).toISOString() } },
+    { id: '22222222-2222-4222-8222-2222222222a1', org_id: 'o1', name: 'Inventory Agent', description: 'Watches stock levels', goal: 'Keep stock healthy', role: 'Inventory analyst', backstory: 'You are careful and exact.', bio: 'online', active: true, visibility: 'private', is_verified: false, avatar_url: null, handle: 'ag-k7m2x9qd', billing_mode: 'owner_pays', created_at: iso(50000), agent_subscriptions: { current_period_end: new Date(now + 20 * 86400000).toISOString() } },
     { id: 'a2', org_id: 'o1', name: 'Finance Agent', description: 'Reconciles payments', goal: 'x', role: 'r', backstory: 'b', bio: null, active: false, visibility: 'personal', is_verified: false, avatar_url: null, handle: 'ag-aaaaaaaa', billing_mode: 'user_pays', created_at: iso(40000), agent_subscriptions: null },
   ],
-  agent_network: [], chats: [{ id: 'c1', agent_id: 'a1', orchestrator_status: 'idle', created_by: 'u1' }],
-  profiles: [{ id: 'u1', name: 'Test User', avatar: null, created_at: iso(99000) }],
+  agent_network: [], chats: [{ id: 'c1', agent_id: '22222222-2222-4222-8222-2222222222a1', orchestrator_status: 'idle', created_by: '11111111-1111-4111-8111-1111111111aa' }],
+  profiles: [{ id: '11111111-1111-4111-8111-1111111111aa', name: 'Test User', avatar: null, created_at: iso(99000) }],
   wallets: [{ balance_credits: 12.3456 }],
   wallet_transactions: [{ id: 't1', amount: 10, reference_id: 'pay_ABC123', created_at: iso(5000), type: 'credit' }],
   invoices: [{ id: 'i1', invoice_number: 'PS-2026-000123', amount: 10, currency: 'USD', issued_at: iso(5000), reference_id: 'pay_ABC123' }],
-  agent_platform_tools: [{ agent_id: 'a1', tool_key: 'code_executor', enabled: true, available_to_members: true }, { agent_id: 'a1', tool_key: 'send_email', enabled: true, available_to_members: false }, { agent_id: 'a1', tool_key: 'whatsapp_chats', enabled: true, available_to_members: false }],
+  agent_platform_tools: [{ agent_id: '22222222-2222-4222-8222-2222222222a1', tool_key: 'code_executor', enabled: true, available_to_members: true }, { agent_id: '22222222-2222-4222-8222-2222222222a1', tool_key: 'send_email', enabled: true, available_to_members: false }, { agent_id: '22222222-2222-4222-8222-2222222222a1', tool_key: 'whatsapp_chats', enabled: true, available_to_members: false }],
   instructions: [{ id: 'n1', title: 'Always cite the sheet', content: 'When you report stock, name the sheet and the row.\nNever guess a number.', enabled: true, available_to_members: true, created_at: iso(30000) }],
   tools: [{ id: 'tl1', name: 'check_inventory', description: 'Reads stock levels from the warehouse sheet.', enabled: true, available_to_members: true, config: { variables: [{ name: 'sku', required: true }, { name: 'warehouse', required: false }], timeout_seconds: 120, code: "def run(sku, warehouse=None):\n    return {'sku': sku, 'qty': 14}" } }],
   agent_created_tools: [{ id: 'ct1', name: 'weekly_summary', description: 'Builds the weekly summary.', enabled: true, available_to_members: false, usage_count: 7, config: { code: 'print(1)' } }],
   secrets: [{ id: 's1', name: 'WAREHOUSE_API_KEY', context: 'Warehouse system key', created_at: iso(20000), agent_importable: false, allowed_hosts: ['api.warehouse.example'] }],
   agent_user_secret_defs: [{ id: 'd1', name: 'BINANCE_API_KEY', context: 'Your own key', required: true, created_at: iso(10000), allowed_hosts: [], agent_importable: true }],
-  agent_signed_apis: [{ agent_id: 'a1', provider_key: 'aws', enabled: true, available_to_members: true }],
+  agent_signed_apis: [{ agent_id: '22222222-2222-4222-8222-2222222222a1', provider_key: 'aws', enabled: true, available_to_members: true }],
   agent_signed_api_credentials: [{ provider_key: 'aws', fields: { access_key_id: 'x', region: 'y' } }],
   agent_mcp_servers: [{ id: 'm1', name: 'GitHub', url: 'https://mcp.github.example/v1', auth_type: 'oauth', enabled: true, available_to_members: false, tools_cache: [{ name: 'list_issues', description: 'List issues in a repo' }, { name: 'create_issue', description: 'Open an issue' }], tools_cached_at: iso(300), oauth_expires_at: null, needs_reconnect: false }],
   browser_accesses: [{ id: 'b1', name: 'vendor-portal', label: 'Vendor portal', host: 'portal.vendor.example', status: 'ready', enabled: true, available_to_members: false, coverage_pct: 62.4, last_verified_at: iso(200), last_error: null }],
-  tasks: [{ id: 'k1', org_id: 'o1', agent_id: 'a1', created_by: 'u1', chat_id: 'c1', definition: 'Every weekday at 9am check inventory and email the buyers a summary of anything below threshold', trigger_type: 'cron', cron_expression: '0 9 * * 1-5', next_run_at: iso(-600), status: 'planned', active_chain_id: null, run_count: 12, last_run_at: iso(900), last_error: null, delivery: 'notification', project_id: null, created_at: iso(4000), updated_at: iso(900), completed_at: null }],
-  shifts: [{ id: 'sh1', org_id: 'o1', agent_id: 'a1', created_by: 'u1', name: 'Night watch', definition: 'Watch prices overnight', status: 'planned', spec: null, last_error: null, plan_attempts: 0, next_start_at: iso(-300), retired_at: null, created_at: iso(3000), updated_at: iso(3000), report_instructions: null, plan_feedback: null, sop_status: null, arena_state: null, learn_wakes: 0, learn_note: null, opening: null }],
-  agent_projects: [{ id: 'p1', org_id: 'o1', agent_id: 'a1', created_by: 'u1', chat_id: 'c1', kind: 'project', title: 'Q4 reorder plan', goal: 'Plan all Q4 reorders', status: 'active', starts_at: iso(2000), ends_at: iso(-9000), plan: [], outcome: null, report: null, last_error: null, hold_reason: null, wake_count: 2, task_count: 3, message_count: 4, next_wake_at: iso(-60), created_at: iso(2000), ended_at: null }],
+  tasks: [{ id: 'k1', org_id: 'o1', agent_id: '22222222-2222-4222-8222-2222222222a1', created_by: '11111111-1111-4111-8111-1111111111aa', chat_id: 'c1', definition: 'Every weekday at 9am check inventory and email the buyers a summary of anything below threshold', trigger_type: 'cron', cron_expression: '0 9 * * 1-5', next_run_at: iso(-600), status: 'planned', active_chain_id: null, run_count: 12, last_run_at: iso(900), last_error: null, delivery: 'notification', project_id: null, created_at: iso(4000), updated_at: iso(900), completed_at: null }],
+  shifts: [{ id: 'sh1', org_id: 'o1', agent_id: '22222222-2222-4222-8222-2222222222a1', created_by: '11111111-1111-4111-8111-1111111111aa', name: 'Night watch', definition: 'Watch prices overnight', status: 'planned', spec: null, last_error: null, plan_attempts: 0, next_start_at: iso(-300), retired_at: null, created_at: iso(3000), updated_at: iso(3000), report_instructions: null, plan_feedback: null, sop_status: null, arena_state: null, learn_wakes: 0, learn_note: null, opening: null }],
+  agent_projects: [{ id: 'p1', org_id: 'o1', agent_id: '22222222-2222-4222-8222-2222222222a1', created_by: '11111111-1111-4111-8111-1111111111aa', chat_id: 'c1', kind: 'project', title: 'Q4 reorder plan', goal: 'Plan all Q4 reorders', status: 'active', starts_at: iso(2000), ends_at: iso(-9000), plan: [], outcome: null, report: null, last_error: null, hold_reason: null, wake_count: 2, task_count: 3, message_count: 4, next_wake_at: iso(-60), created_at: iso(2000), ended_at: null }],
   task_runs: [],
   agent_email_settings: [{ allow_any_recipient: false, allowed_recipients: ['buyers@acme.co', 'cfo@acme.co'], daily_cap: 50, reply_to_mode: 'owner', suspended: false, suspended_reason: null }],
   agent_emails: [{ id: 'e1', created_at: iso(120), to_addresses: ['buyers@acme.co'], subject: 'Weekly stock summary', body_text: 'Hi team,\nBrahmi is low (14).', status: 'delivered', error: null, from_address: 'ag-k7m2x9qd@mails.parasync.in', attachments: [{ filename: 'stock.xlsx' }] }],
@@ -66,11 +68,11 @@ const T = {
   messages: [{ id: 'm3', role: 'assistant', content: 'Hello!', status: 'completed', created_at: iso(5), metadata: null, private: false }],
   agent_notifications: [], marketplace_agents: [], my_agent_invites: [], shift_runs: [],
 };
-const USAGE = []; for (let i = 0; i < 40; i++) USAGE.push({ day: day(i), agent_id: i % 3 ? 'a1' : 'a2', agent_name: i % 3 ? 'Inventory Agent' : 'Finance Agent', source: i % 4 ? 'chat' : 'scheduled_task', cost: 0.05 + (i % 7) * 0.02, calls: 4 + (i % 5), prompt_tokens: 12000, completion_tokens: 3000 });
+const USAGE = []; for (let i = 0; i < 40; i++) USAGE.push({ day: day(i), agent_id: i % 3 ? '22222222-2222-4222-8222-2222222222a1' : 'a2', agent_name: i % 3 ? 'Inventory Agent' : 'Finance Agent', source: i % 4 ? 'chat' : 'scheduled_task', cost: 0.05 + (i % 7) * 0.02, calls: 4 + (i % 5), prompt_tokens: 12000, completion_tokens: 3000 });
 
 (async () => {
   await new Promise((r) => api.listen(54701, r));
-  const app = await electron.launch({ executablePath: require('path').resolve(import.meta.dirname, '../../node_modules/electron/dist/electron'), args: ['--no-sandbox', '--disable-gpu', require('path').resolve(import.meta.dirname, '../..')], env: { ...process.env, PARASYNC_WEB_URL: 'http://127.0.0.1:54701' } });
+  const app = await electron.launch({ executablePath: require('path').resolve(import.meta.dirname, '../../node_modules/electron/dist/electron'), args: ['--no-sandbox', '--disable-gpu', require('path').resolve(import.meta.dirname, '../..')], env: { ...process.env, PARASYNC_WEB_URL: 'http://127.0.0.1:54701', PARASYNC_TEST_PLAINTEXT_VAULT: '1' } });
   const win = await app.firstWindow(); win.setDefaultTimeout(4000);
   const errors = [];
   win.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
@@ -98,12 +100,12 @@ const USAGE = []; for (let i = 0; i < 40; i++) USAGE.push({ day: day(i), agent_i
     return route.fulfill({ status: 200, headers, body: JSON.stringify(rows) });
   });
   await win.waitForLoadState('domcontentloaded');
-  const session = { access_token: TOKEN, refresh_token: 'r', expires_in: 3600, expires_at: Math.floor(now / 1000) + 3600, token_type: 'bearer', user: { id: 'u1', aud: 'authenticated', email: 'tester@example.com', app_metadata: {}, user_metadata: {}, created_at: iso(99999) } };
+  const session = { access_token: TOKEN, refresh_token: 'r', expires_in: 3600, expires_at: Math.floor(now / 1000) + 3600, token_type: 'bearer', user: { id: '11111111-1111-4111-8111-1111111111aa', aud: 'authenticated', email: 'tester@example.com', app_metadata: {}, user_metadata: {}, created_at: iso(99999) } };
   await win.evaluate((s) => window.parasync.storage.set('sb-eyufwzhxxfebncwaxgci-auth-token', JSON.stringify(s)), session);
   await win.reload(); await win.waitForTimeout(2000);
   const shot = async (name) => { await win.waitForTimeout(1500); await win.screenshot({ path: `${OUT}/${name}.png` }); };
   const results = [];
-  const check = async (label, fn) => { const before = errors.length; try { await fn(); } catch (e) { errors.push(`STEP ${label}: ${String(e.message).split('\n')[0]}`); } results.push(`${errors.length === before ? 'ok  ' : 'FAIL'} ${label}`); };
+  const check = async (label, fn) => { const before = errors.length; try { await fn(); } catch (e) { errors.push(`STEP ${label}: ${String(e.message).split('\n').slice(0, 3).join(' | ')}`); await win.screenshot({ path: `${OUT}/FAIL_${label.replace(/\W+/g, '_')}.png` }).catch(() => undefined); } results.push(`${errors.length === before ? 'ok  ' : 'FAIL'} ${label}`); };
   const fresh = async () => { await win.reload(); await win.waitForTimeout(1600); };
   const toSettings = async () => { await win.getByText('Inventory Agent').first().click(); await win.waitForTimeout(900); await win.mouse.click(490, 24); await win.waitForTimeout(900); };
   for (const label of ['Runsheet', 'Platform Tools', 'WhatsApp', 'Tool Builder', 'Instructions', 'Secrets', 'Database Integrations', 'MCP', 'Browser Access', 'Add Users', 'Workspace', 'Agent Profile']) {
@@ -114,6 +116,25 @@ const USAGE = []; for (let i = 0; i < 40; i++) USAGE.push({ day: day(i), agent_i
   }
   await check('account pages', async () => { await fresh(); await win.getByTitle('Account').click(); await win.waitForTimeout(1200); for (const label of ['Billing', 'Usage', 'Profile']) { await win.getByText(label, { exact: true }).first().click(); await shot('x_acct_' + label); } });
   await check('about page', async () => { await fresh(); await win.getByLabel('About this app').click(); await shot('x_about'); });
+  await check('secrets on this PC: add, copy on save, check, remove', async () => {
+    await fresh(); await win.getByLabel('About this app').click(); await win.waitForTimeout(800);
+    await win.getByText('Add a secret to this PC').click();
+    await win.getByPlaceholder('STRIPE_KEY').fill('api_key');
+    await win.getByPlaceholder('Stays on this PC; never shown again').fill('sk-live-0123456789');
+    await win.getByRole('button', { name: 'Save', exact: true }).click(); await win.waitForTimeout(1500);
+    await shot('x_vault_after_add');
+    await win.getByText('API_KEY', { exact: false }).first().waitFor();
+    // a save made on a web-copy screen is also kept here
+    await win.evaluate(() => fetch('/api/agents/22222222-2222-4222-8222-2222222222a1/secrets', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'WEB_KEY', value: 'web-value-123456' }) }));
+    await fresh(); await win.getByLabel('About this app').click(); await win.waitForTimeout(1200);
+    await win.getByText('WEB_KEY', { exact: false }).first().waitFor();
+    await win.getByRole('button', { name: 'Check', exact: true }).first().click(); await win.waitForTimeout(1500); const body = await win.locator('body').innerText(); if (!body.includes('Matches the cloud')) throw new Error('no match line; page says: ' + body.slice(body.indexOf('Secrets on this PC'), body.indexOf('Secrets on this PC') + 700).replace(/\n+/g, ' / '));
+    await shot('x_vault');
+    const list = await win.evaluate(() => window.parasync.vault.list());
+    if (JSON.stringify(list).includes('sk-live-0123456789') || JSON.stringify(list).includes('web-value-123456')) throw new Error('a value came back to the page');
+    await win.getByRole('button', { name: 'Remove', exact: true }).first().click(); await win.waitForTimeout(800);
+    await win.evaluate(() => window.parasync.vault.wipe());
+  });
   console.log(results.join('\n'));
   console.log('web api calls:', apiLog.filter((l, i, a) => a.indexOf(l) === i));
   console.log('unmocked tables hit:', [...unmocked]);

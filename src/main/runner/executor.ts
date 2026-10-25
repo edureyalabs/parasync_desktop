@@ -4,9 +4,19 @@
 // Linux box and answered. Three kinds of work: a code run (its own short process), and the three browser verbs (open / exec / close) that
 // drive a long-lived browser process (browserHost.ts). It also keeps the Linux image up to date. Nothing here knows about Electron:
 // everything it touches is passed in, so it is tested on its own (scripts/tests/executor.test.ts).
-import { RUNNER_CONFIG, SEALED_CHECK_CODE, compareVersions, runnerHasBrowser, type RunnerStatus } from '../../shared/runner';
+import { RUNNER_CONFIG, SEALED_CHECK_CODE, compareVersions, runnerHasBroker, runnerHasBrowser, type RunnerStatus } from '../../shared/runner';
+import type { HeldMap } from '../../shared/vault';
+import { redactOutcome } from '../vault/redact';
+import type { Ref } from '../vault/vault';
 import { SignedOutError, type Cloud } from './cloud';
+import { parseLocalSecrets, type BrokerSecrets } from './localSecrets';
 import type { JobOutcome } from './wsl';
+
+/** The secrets this PC holds, as the executor sees them (vault.ts implements it; the page can never reach these two calls). */
+export interface VaultApi {
+  held(userId: string): Promise<HeldMap>;
+  resolve(userId: string, wanted: (Ref & { version?: number })[]): Promise<{ values: Map<string, { value: string; hosts: string[] }>; missing: Ref[] }>;
+}
 
 /** The browser side, as the executor sees it (browserHost.ts implements open/exec/close; index.ts adds the self-test). */
 export interface BrowserApi {
@@ -29,8 +39,9 @@ export interface ExecutorDeps {
   cloud: Cloud;
   wslAvailable(): Promise<boolean>;
   distroInstalled(): Promise<boolean>;
-  runJob(job: unknown, timeoutSeconds: number): Promise<JobOutcome>;
+  runJob(job: unknown, timeoutSeconds: number, broker?: BrokerSecrets): Promise<JobOutcome>;
   browser?: BrowserApi;
+  vault?: VaultApi;
   update?: UpdateApi;
   getSetting(key: string): Promise<string | null>;
   setSetting(key: string, value: string): Promise<void>;
@@ -47,6 +58,8 @@ const ENV_CHECK_EVERY_MS = 30_000;
 const SESSION_ID = /^[0-9a-fA-F-]{8,64}$/;
 
 interface Done { ok: boolean; result: unknown; error: string | null }
+interface Prepared { payload: Record<string, unknown>; broker?: BrokerSecrets; values: string[]; credentialValues: string[]; spec: ReturnType<typeof parseLocalSecrets> }
+interface Refused { refused: string; missing?: Ref[] }
 
 export class Executor {
   private status: RunnerStatus = { state: 'off', enabled: false };
@@ -62,6 +75,8 @@ export class Executor {
   private lastEnvCheckAt = 0;
   private lastJobAt = 0;
   private browserReady = false;
+  /** Browser sessions that were logged in with a saved login: everything their calls return is scrubbed of the login and of session tokens. */
+  private readonly scrub = new Map<string, { values: Set<string> }>();
   private wslOk = false;
   private distroOk = false;
   private readonly inflight = new Set<Promise<void>>();
@@ -85,6 +100,7 @@ export class Executor {
       // no longer taking work, so its runs go to the cloud at once instead of waiting for the check-in to go stale. (Best effort: the old
       // token is still held here.)
       await this.d.browser?.closeAll();
+      this.scrub.clear();
       await this.heartbeat(false).catch(() => undefined);
     }
     this.userId = userId;
@@ -114,6 +130,7 @@ export class Executor {
     if (!enabled) {
       this.browserReady = false;
       await this.d.browser?.closeAll();
+      this.scrub.clear();
       this.set({ state: 'off', enabled: false });
       await this.heartbeat(false).catch(() => undefined); // tell the cloud right away: not ready, not accepting work
       return;
@@ -143,7 +160,15 @@ export class Executor {
   async goodbye(): Promise<void> {
     if (!this.userId || !this.status.enabled) return;
     this.stop();
+    this.scrub.clear();
     await Promise.all([this.d.browser?.closeAll(), this.heartbeat(false).catch(() => undefined)]);
+  }
+
+  /** The vault changed (a secret was added or removed): tell the cloud at the next opportunity, not in 30 s. */
+  notifyHeldChanged(): void {
+    this.lastHeartbeatAt = 0;
+    this.lastHeartbeatTry = 0;
+    if (this.status.enabled) this.schedule(0);
   }
 
   reportError(message: string): void {
@@ -343,17 +368,95 @@ export class Executor {
   }
 
   private async runCodeJob(job: { payload: unknown; timeout_seconds: number }): Promise<Done> {
-    const outcome = await this.d.runJob(job.payload, job.timeout_seconds);
+    let payload: unknown = job.payload;
+    let broker: BrokerSecrets | undefined;
+    let secretValues: string[] = [];
+    const raw = job.payload && typeof job.payload === 'object' && !Array.isArray(job.payload) ? (job.payload as Record<string, unknown>) : null;
+    if (raw && 'local_secrets' in raw) {
+      const prepared = await this.prepareSecrets(raw, false);
+      if ('refused' in prepared) return this.refuse(prepared);
+      payload = prepared.payload;
+      broker = prepared.broker;
+      secretValues = prepared.values;
+    }
+    const outcome = await this.d.runJob(payload, job.timeout_seconds, broker);
     if (outcome.kind !== 'result') return { ok: false, result: { ok: false, error: outcome.message }, error: outcome.message };
-    let ok = outcome.result['ok'] === true;
-    let result: unknown = outcome.result;
-    let error: string | null = ok ? null : String(outcome.result['error'] ?? 'The code reported an error.').slice(0, 1900);
+    // A secret that only this PC holds is unknown to the cloud, so this PC blanks it from the answer before it leaves.
+    const answer = secretValues.length ? redactOutcome(outcome.result, secretValues) : outcome.result;
+    let ok = answer['ok'] === true;
+    let result: unknown = answer;
+    let error: string | null = ok ? null : String(answer['error'] ?? 'The code reported an error.').slice(0, 1900);
     if (JSON.stringify(result).length > MAX_RESULT_BYTES) {
       ok = false;
       result = null;
       error = 'The result was too large to send back (over 20 MB).';
     }
     return { ok, result, error };
+  }
+
+  /**
+   * Turns a job's `local_secrets` request into what the Linux box is given. Anything this PC cannot supply (not held, an out-of-date copy,
+   * a box too old for the broker, a malformed request) refuses the job BEFORE any code runs, with `not_run: true`, so the cloud knows
+   * nothing happened and may run it itself when the secrets also exist there.
+   */
+  private async prepareSecrets(raw: Record<string, unknown>, browser: boolean): Promise<Prepared | Refused> {
+    const { local_secrets: request, ...rest } = raw;
+    let spec: ReturnType<typeof parseLocalSecrets>;
+    try {
+      spec = parseLocalSecrets(request);
+    } catch (e) {
+      return { refused: `This PC cannot use that secrets request: ${e instanceof Error ? e.message : 'invalid'}.` };
+    }
+    if (!spec) return { payload: rest, values: [], credentialValues: [], spec: null };
+    if (!this.d.vault || !this.userId) return { refused: 'This PC has no secrets to give.' };
+    if (browser && spec.broker) return { refused: 'Browser calls cannot use the local broker.' };
+    if (!browser && spec.credentials) return { refused: 'A saved login can only be used by a browser call.' };
+    // Raw environment secrets are for saved tools only (function mode: code an admin fixed, with declared inputs). Free-form scripts get a secret
+    // only through the broker, so even a mistaken or forged request cannot hand one to a script that could read and send it anywhere.
+    if (!browser && spec.env.length > 0 && rest['mode'] !== 'function') return { refused: 'Raw secrets are only given to saved tools, never to a free-form script.' };
+    if (spec.broker && !runnerHasBroker(this.runnerVersion)) return { refused: 'The Linux box on this PC has to update before it can keep secrets away from a script.' };
+
+    const wanted = [...spec.env, ...(spec.broker?.names ?? []), ...(spec.credentials ? [spec.credentials] : [])];
+    const { values, missing } = await this.d.vault.resolve(this.userId, wanted);
+    if (missing.length > 0) {
+      return { refused: `This PC does not hold the current copy of: ${missing.map((m) => m.name).join(', ')}.`, missing };
+    }
+    const key = (r: Ref) => `${r.agentId}|${r.kind}|${r.name}`;
+    const env: Record<string, string> = {};
+    const all: string[] = [];
+    for (const e of spec.env) {
+      const v = values.get(key(e))!.value;
+      env[e.name] = v;
+      all.push(v);
+    }
+    let broker: BrokerSecrets | undefined;
+    if (spec.broker) {
+      broker = {
+        secrets: spec.broker.names.map((n) => {
+          const entry = values.get(key(n))!;
+          all.push(entry.value);
+          return { name: n.name, value: entry.value, hosts: n.hosts.length > 0 ? n.hosts : entry.hosts };
+        }),
+        cloud: spec.broker.cloud,
+      };
+    }
+    const credentialValues: string[] = [];
+    if (spec.credentials) {
+      const text = values.get(key(spec.credentials))!.value;
+      env['PARASYNC_CREDS'] = text;
+      credentialValues.push(text);
+      try {
+        const parsed: unknown = JSON.parse(text);
+        if (parsed && typeof parsed === 'object') for (const v of Object.values(parsed as Record<string, unknown>)) if (typeof v === 'string') credentialValues.push(v);
+      } catch { /* a login that is not JSON is used whole */ }
+    }
+    const existing = rest['env_vars'] && typeof rest['env_vars'] === 'object' && !Array.isArray(rest['env_vars']) ? (rest['env_vars'] as Record<string, string>) : {};
+    return { payload: { ...rest, env_vars: { ...existing, ...env } }, broker, values: all, credentialValues, spec };
+  }
+
+  private refuse(r: Refused): Done {
+    const result = { ok: false, error: r.refused, not_run: true, ...(r.missing ? { local_secrets_missing: r.missing.map((m) => ({ kind: m.kind, name: m.name })) } : {}) };
+    return { ok: false, result, error: r.refused };
   }
 
   private async runBrowserJob(kind: string, p: Record<string, unknown>): Promise<Done> {
@@ -367,16 +470,40 @@ export class Executor {
       return { ok: r.ok, result: r, error: r.ok ? null : (r.error ?? 'The browser could not be opened.') };
     }
     if (kind === 'browser_close') {
+      this.scrub.delete(sessionId);
       await browser.close(sessionId);
       return { ok: true, result: { ok: true }, error: null };
     }
     if (kind === 'browser_exec') {
       const code = typeof p['code'] === 'string' ? p['code'] : '';
       const files = p['files'] && typeof p['files'] === 'object' ? (p['files'] as Record<string, string>) : {};
-      const env = p['env_vars'] && typeof p['env_vars'] === 'object' ? (p['env_vars'] as Record<string, string>) : {};
       const timeout = typeof p['timeout'] === 'number' ? p['timeout'] : 120;
       if (!code.trim()) return fail('no code provided');
-      const outcome = await browser.exec(sessionId, { code, files, env_vars: env, timeout });
+      let env = p['env_vars'] && typeof p['env_vars'] === 'object' ? (p['env_vars'] as Record<string, string>) : {};
+      const needles: string[] = [];
+      let credentialCall = false;
+      if ('local_secrets' in p) {
+        const prepared = await this.prepareSecrets(p, true);
+        if ('refused' in prepared) return this.refuse(prepared);
+        env = (prepared.payload['env_vars'] ?? {}) as Record<string, string>;
+        needles.push(...prepared.values, ...prepared.credentialValues);
+        credentialCall = prepared.spec?.credentials != null;
+      }
+      const session = this.scrub.get(sessionId) ?? (credentialCall ? { values: new Set<string>() } : undefined);
+      if (session) {
+        for (const v of needles) session.values.add(v);
+        this.scrub.set(sessionId, session);
+      }
+      let outcome = await browser.exec(sessionId, { code, files, env_vars: env, timeout });
+      if (p['learn_values'] === true && session && outcome['ok'] === true) {
+        // The cloud asked this PC to note what a logged-in session holds (cookies, storage), so later answers can be scrubbed here. The
+        // values themselves stay on this PC: only how many were noted goes back.
+        const found = (outcome['result'] as { values?: unknown } | null)?.values;
+        const list = Array.isArray(found) ? found.filter((v): v is string => typeof v === 'string' && v.length >= 8 && v.length <= 4000).slice(0, 40) : [];
+        for (const v of list) session.values.add(v);
+        outcome = { ok: true, result: { learned: list.length }, stdout: '' };
+      }
+      if (session || needles.length > 0) outcome = redactOutcome(outcome, [...(session?.values ?? []), ...needles], session !== undefined);
       const ok = outcome['ok'] === true;
       if (JSON.stringify(outcome).length > MAX_RESULT_BYTES) return fail('The result was too large to send back (over 20 MB).');
       return { ok, result: outcome, error: ok ? null : String(outcome['error'] ?? 'The script failed.').slice(0, 1900) };
@@ -398,7 +525,9 @@ export class Executor {
     if (!this.userId) return;
     const id = await this.ensureDeviceId();
     const isReady = ready && this.status.enabled;
+    const held = this.d.vault ? await this.d.vault.held(this.userId).catch(() => undefined) : undefined;
     await this.d.cloud.saveDevice(id, this.userId, {
+      ...(held ? { held_secrets: held } : {}),
       name: this.d.deviceName,
       app_version: this.d.appVersion,
       runner_version: this.runnerVersion,

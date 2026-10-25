@@ -2,6 +2,8 @@
 // The app's side of the mailbox in Supabase (tables desktop_devices / desktop_jobs). Plain REST calls as the signed-in person: row-level
 // security means they can only ever see and change their own devices and jobs. No service key exists in this app.
 
+import type { HeldMap } from '../../shared/vault';
+
 export interface JobRow {
   id: string;
   agent_id: string | null;
@@ -22,6 +24,8 @@ export interface DevicePatch {
   browser_ready?: boolean;
   last_browser_canary_ok?: boolean;
   last_browser_canary_note?: string | null;
+  /** Names and versions of the secrets this PC holds, by agent. Never values. */
+  held_secrets?: HeldMap;
 }
 
 export class SignedOutError extends Error {}

@@ -38,6 +38,14 @@ const api: DesktopApi = {
     setSession: (userId, token) => ipcRenderer.invoke(IPC.runnerSession, userId, token),
     onStatus: (cb) => subscribe<RunnerStatus>(IPC.runnerStatus, cb),
   },
+  vault: {
+    info: () => ipcRenderer.invoke(IPC.vaultInfo),
+    list: () => ipcRenderer.invoke(IPC.vaultList),
+    put: (input) => ipcRenderer.invoke(IPC.vaultPut, input),
+    remove: (ref) => ipcRenderer.invoke(IPC.vaultRemove, ref),
+    wipe: () => ipcRenderer.invoke(IPC.vaultWipe),
+    verify: (ref) => ipcRenderer.invoke(IPC.vaultVerify, ref),
+  },
   updates: {
     get: () => ipcRenderer.invoke(IPC.updateGet),
     check: () => ipcRenderer.invoke(IPC.updateCheck),

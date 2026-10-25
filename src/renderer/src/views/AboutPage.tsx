@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import { Button } from '~/components/ui';
 import { LocalExecutionCard } from '~/components/LocalExecutionCard';
+import { LocalSecretsCard } from '~/components/LocalSecretsCard';
 import { useUpdates } from '~/hooks/useUpdates';
 import { useAuth } from '~/lib/auth';
 import { useRouter } from '~/shims/nextNavigation';
@@ -43,6 +44,7 @@ export function AboutPage() {
           <Button variant="secondary" label="Sign out" loading={signingOut} onClick={() => { setSigningOut(true); void signOut(); }} />
         </div>
         <LocalExecutionCard />
+        <LocalSecretsCard />
       </div>
     </div>
   );

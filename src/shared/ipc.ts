@@ -3,6 +3,7 @@
 // and the preload exposes nothing else.
 
 import type { RunnerStatus } from './runner';
+import type { PutInput, Ref, VaultMeta, VerifyResult } from './vault';
 
 export const IPC = {
   storageGet: 'storage:get',
@@ -24,6 +25,12 @@ export const IPC = {
   runnerInstall: 'runner:install',
   runnerSession: 'runner:session',
   runnerStatus: 'runner:status',
+  vaultInfo: 'vault:info',
+  vaultList: 'vault:list',
+  vaultPut: 'vault:put',
+  vaultRemove: 'vault:remove',
+  vaultWipe: 'vault:wipe',
+  vaultVerify: 'vault:verify',
 } as const;
 
 export type UpdateStatus =
@@ -87,6 +94,20 @@ export interface DesktopApi {
     /** Tells the main process who is signed in (null on sign-out) and the current access token, renewed whenever it changes. */
     setSession(userId: string | null, token: string | null): Promise<void>;
     onStatus(cb: (status: RunnerStatus) => void): () => void;
+  };
+  /**
+   * Secrets this PC keeps for the signed-in person, so tool runs here can use them without the cloud sending any down. A value can be put in
+   * and removed but is NEVER returned: list() gives names, versions and dates only.
+   */
+  vault: {
+    info(): Promise<{ available: boolean }>;
+    list(): Promise<VaultMeta[]>;
+    put(input: PutInput): Promise<VaultMeta>;
+    remove(ref: Ref): Promise<boolean>;
+    /** Deletes everything this PC holds for the signed-in account. */
+    wipe(): Promise<void>;
+    /** Asks the cloud whether this PC's copy matches its own, sending only a keyed hash (never the value). */
+    verify(ref: Ref): Promise<VerifyResult>;
   };
   updates: {
     get(): Promise<UpdateStatus>;

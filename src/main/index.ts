@@ -7,6 +7,7 @@ import { APP_CONFIG } from '../shared/config';
 import { IPC, type AppInfo } from '../shared/ipc';
 import { encryptionAvailable, getItem, removeItem, setItem } from './secureStore';
 import { runnerInstall, runnerSession, runnerSetEnabled, runnerStatus, startRunner } from './runner';
+import { vaultInfo, vaultList, vaultPut, vaultRemove, vaultVerify, vaultWipe } from './vault';
 import { checkNow, getStatus, installNow, startUpdater } from './updater';
 import { apiRequest, downloadToDisk, openApiRedirect } from './webApi';
 
@@ -218,6 +219,13 @@ if (!app.requestSingleInstanceLock()) {
     handle(IPC.runnerSetEnabled, (_e, enabled) => runnerSetEnabled(enabled));
     handle(IPC.runnerInstall, () => runnerInstall());
     handle(IPC.runnerSession, (_e, userId, token) => runnerSession(userId, token));
+
+    handle(IPC.vaultInfo, () => vaultInfo());
+    handle(IPC.vaultList, () => vaultList());
+    handle(IPC.vaultPut, (_e, input) => vaultPut(input));
+    handle(IPC.vaultRemove, (_e, ref) => vaultRemove(ref));
+    handle(IPC.vaultWipe, () => vaultWipe());
+    handle(IPC.vaultVerify, (_e, ref) => vaultVerify(ref));
 
     handle(IPC.updateGet, () => getStatus());
     handle(IPC.updateCheck, () => checkNow());

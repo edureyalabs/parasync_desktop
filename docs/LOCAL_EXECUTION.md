@@ -71,7 +71,7 @@ A PC is Ready only if `bad` is empty (fail closed; the card shows which check fa
 Network egress from the box is open (same as the cloud MicroVMs).
 
 ## 8. Trust rules that must not be loosened
-1. Only broker-mode payloads go local; raw-secret payloads (admin Tool Builder tools, anything with other env vars) stay in the cloud.
+1. Only broker-mode payloads go local; raw-secret payloads (admin Tool Builder tools, anything with other env vars) stay in the cloud — EXCEPT when the PC itself holds the secrets (its vault): then only names go down and the PC fills the values in. See `docs/LOCAL_SECRETS.md`.
 2. Never run a claimed-then-lost job in the cloud. Never cancel a claimed job.
 3. The app never holds a service key, a Fernet key, or a provider key. Only the person's own token, in memory.
 4. A device is Ready only while the sealed-box self-test passes.
@@ -106,6 +106,9 @@ a local session is NEVER moved to the cloud (page state cannot move).
 **Latency note:** each browser step is a mailbox round trip (poll 0.4 s while work is flowing, plus the claim/finish calls), so expect roughly 1–2 s of overhead per call versus the cloud.
 **Residue:** Chromium on the PC reaches the internet with no filter (like the cloud). Downloads and files live only under `/tmp/parasync-browser/<session>/work` in the box and are returned as output files.
 
+## 10b. Secrets kept on the PC (built 2026-10-26)
+The whole design — the vault, the `local_secrets` job request, the local broker (image 0.3.0), the owner's local Browser Access login, the yes/no copy check, lifecycle, what it does not protect against, release order — is in **`docs/LOCAL_SECRETS.md`**. Read it before touching any of it.
+
 ## 11. Known limits / not built
 Per-agent owner consent for running agent code on a member's PC (deliberately deferred; "handle it a different way") · serving two accounts at once on one PC · files over 2 MB in a local run or browser call · Windows code signing ·
 realtime push instead of polling · macOS/Linux desktop · scheduled/background work that must run while the PC is off (falls to the cloud by design).
@@ -129,3 +132,4 @@ realtime push instead of polling · macOS/Linux desktop · scheduled/background 
 - Open questions to verify on the first real run: Playwright 1.49.1 + Chromium inside WSL (CI proves the image; the PC proves WSL), `runuser`/`--exec` start-up for the host, browser step latency, behaviour when the PC sleeps mid-session.
 - 2026-10-25 — PROVEN on a real PC: image self-updated to 0.2.0, `browser_ready=true`, `local_browser_enabled='true'`; a real task ran `browser_open` → `browser_exec` → `browser_close` as `desktop_jobs` (all done, ~1 s claim), screenshot came back correct.
 - 2026-10-25 — desktop 0.5.1: every `/api` call from the app failed ("Parasync could not be reached", Platform tools / Database integration empty, attachment download "no longer available"). Cause: `parasync.in` answers 308 → `www.parasync.in` and `webApi.ts` uses `redirect: 'error'`. Fix: `APP_CONFIG.webUrl` is now `https://www.parasync.in`. Google sign-in return stays on the bare host via `APP_CONFIG.bridgeBase` (that is the one listed in Supabase Redirect URLs). Rule: never point `webUrl` at a host that redirects. Also: app icon now has rounded corners (transparent).
+- 2026-10-26 — SECRETS ON THE PC built (desktop 0.6.0, localrunner image 0.3.0, bemain `local_secrets.py`, migration `20261026020000_device_held_secrets.sql` APPLIED). Tests: desktop 61, bemain 1038, localrunner 46+; the screens were exercised in the real Electron app against fakes (`scripts/ui-test/sweep.ts`). NOT yet proven on a real PC: Windows DPAPI encryption of the vault, the supervisor/broker inside the real WSL box (image 0.3.0 not published yet), a real PC-only secret used by a tool. Order: CI green on localrunner → publish `v0.3.0` → release desktop 0.6.0.

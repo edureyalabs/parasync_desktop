@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 
 import { RUNNER_CONFIG } from '../../shared/runner';
 import type { HostProcess } from './browserHost';
+import type { BrokerSecrets } from './localSecrets';
 
 const MARKER = '__PARASYNC_JOB_RESULT__';
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024; // the result carries output files as base64; the cloud caps them at 25 MB
@@ -93,8 +94,12 @@ export async function unregisterDistro(packaged: boolean): Promise<void> {
  * interop sockets, then drops to the unprivileged user BEFORE any agent code exists. The user cannot switch it back on (needs root).
  * `--exec` passes the script as one argument, so no shell re-parses it. No double quotes in the script: Windows quoting.
  */
-export function jobArgs(limit: number): string[] {
-  const script = `${LOCK_INTEROP} exec runuser -u runner -- env -u WSL_INTEROP timeout --signal=KILL ${limit} python3 /opt/runner/run_job.py`;
+export function jobArgs(limit: number, supervised = false): string[] {
+  // A job that is given secrets to broker is started by the supervisor (it stays root so the script's user cannot read what it holds,
+  // runs the broker, and starts the script as the unprivileged user itself).
+  const script = supervised
+    ? `${LOCK_INTEROP} exec timeout --signal=KILL ${limit + 20} python3 /opt/runner/job_supervisor.py ${limit}`
+    : `${LOCK_INTEROP} exec runuser -u runner -- env -u WSL_INTEROP timeout --signal=KILL ${limit} python3 /opt/runner/run_job.py`;
   return ['-d', RUNNER_CONFIG.distro, '-u', 'root', '--exec', 'sh', '-c', script];
 }
 
@@ -145,10 +150,12 @@ export function spawnBrowserHost(packaged: boolean, sessionId: string): HostProc
 export type JobOutcome = { kind: 'result'; result: Record<string, unknown> } | { kind: 'failed'; message: string };
 
 /** Runs one job. `timeoutSeconds` is the call's own limit; the Linux side enforces it with `timeout`, and a little extra covers start-up. */
-export async function runJob(packaged: boolean, job: unknown, timeoutSeconds: number): Promise<JobOutcome> {
+export async function runJob(packaged: boolean, job: unknown, timeoutSeconds: number, broker?: BrokerSecrets): Promise<JobOutcome> {
   const limit = Math.max(1, Math.min(Math.floor(timeoutSeconds), 900));
-  const args = jobArgs(limit);
-  const r = await run(wslBinary(packaged), args, { input: JSON.stringify(job), timeoutMs: (limit + 30) * 1000 });
+  const args = jobArgs(limit, broker !== undefined);
+  // The secrets travel on the same standard input as the job and are never put on a command line or written to a file.
+  const input = broker ? JSON.stringify({ job, broker }) : JSON.stringify(job);
+  const r = await run(wslBinary(packaged), args, { input, timeoutMs: (limit + 30) * 1000 });
   if (r.timedOut) return { kind: 'failed', message: `The code did not finish within ${limit}s and was stopped.` };
   if (r.spawnError) return { kind: 'failed', message: `The Linux box could not be started: ${r.spawnError}` };
   const text = r.stdout.toString('utf8');
