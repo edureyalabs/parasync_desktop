@@ -1,5 +1,5 @@
 // components/browser-access/types.ts
-// Row shapes and constants for the Browser Access tab (tables browser_accesses, browser_access_runs / _steps / _skills / _profile_versions).
+// Row shapes and constants for the Browser Access tab (tables browser_accesses, browser_access_runs / _steps / _profile_versions).
 
 export interface AccessField {
   key: string;
@@ -36,30 +36,13 @@ export interface Access {
 
 export interface Run {
   id: string;
-  kind: 'onboard' | 'test' | 'study' | 'condense';
+  kind: 'onboard' | 'test' | 'study' | 'condense' | 'research' | 'build';
   status: 'queued' | 'running' | 'awaiting_credentials' | 'done' | 'failed';
   error: string | null;
   started_at: string;
   trigger: 'manual' | 'auto';
   attempts: number;
   next_attempt_at: string | null;
-}
-
-export interface Skill {
-  id: string;
-  name: string;
-  title: string;
-  when_to_use: string;
-  params: { name: string; type?: string; required?: boolean; description?: string }[];
-  script: string;
-  returns: string | null;
-  gotchas: string | null;
-  status: 'verified' | 'unverified' | 'stale';
-  evidence_count: number;
-  last_confirmed_at: string | null;
-  enabled: boolean;
-  version: number;
-  updated_at: string;
 }
 
 export interface Step {
@@ -81,3 +64,46 @@ export const STATUS_TEXT: Record<AccessStatus, string> = {
 export const STATUS_TONE: Record<AccessStatus, 'neutral' | 'brass' | 'green' | 'red'> = {
   draft: 'neutral', onboarding: 'brass', awaiting_credentials: 'brass', ready: 'green', failed: 'red', disabled: 'neutral',
 };
+
+// A tool the researcher suggested (table tool_proposals) and a tool already linked to the access (agent_created_tools with access_id set).
+export type ProposalStatus = 'proposed' | 'approved' | 'building' | 'built' | 'failed' | 'rejected';
+
+export interface ProposalInput {
+  name: string;
+  data_type?: string;
+  required?: boolean;
+  context?: string;
+}
+
+export interface ToolProposal {
+  id: string;
+  name: string;
+  title: string;
+  summary: string;
+  runs_in: 'http' | 'page';
+  inputs: ProposalInput[];
+  returns: string | null;
+  changes_data: boolean;
+  evidence: { number: number; task_id: string; definition: string }[];
+  approach: string | null;
+  sample_inputs: Record<string, unknown> | null;
+  hint: string | null;
+  status: ProposalStatus;
+  remarks: string | null;
+  tool_name: string | null;
+  verification: string | null;
+  error: string | null;
+  created_at: string;
+}
+
+export interface LinkedToolRow {
+  id: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  runs_in: 'http' | 'page' | null;
+  verified_at: string | null;
+  fail_count: number;
+  last_error: string | null;
+  usage_count: number;
+}

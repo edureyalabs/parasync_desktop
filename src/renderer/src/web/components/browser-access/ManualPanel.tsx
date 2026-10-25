@@ -121,11 +121,11 @@ export function ManualPanel({ access, agentId, onUpdated, onStudyStarted }: { ac
         </div>
         <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: '0.4rem' }}>
           <Btn icon={studying && latestRun?.kind !== 'condense' ? undefined : 'compass'} onClick={() => startRun('study')} disabled={studying || busy}
-            title="An agent reads the history of what tasks did on this site and adds anything the manual and skills are missing. It does not rewrite what is already right.">
+            title="An agent reads the history of what tasks did on this site and adds anything the manual is missing. It does not rewrite what is already right.">
             {studying && latestRun?.kind !== 'condense' ? <><Spinner size={10} /> Studying…</> : 'Study past activity'}
           </Btn>
           <Btn icon={studying && latestRun?.kind === 'condense' ? undefined : 'rotate-cw'} onClick={() => startRun('condense')} disabled={studying || busy}
-            title="Makes the manual and the skill descriptions shorter without losing facts. Reads no history; skill scripts are not touched.">
+            title="Makes the manual shorter without losing facts. Reads no history.">
             {studying && latestRun?.kind === 'condense' ? <><Spinner size={10} /> Condensing…</> : 'Condense'}
           </Btn>
         </span>

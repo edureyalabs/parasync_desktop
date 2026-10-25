@@ -13,7 +13,7 @@ import type { IconName } from '@/components/icons/Icon';
 import { C } from '@/components/account/tokens';
 
 // Browser Access: websites that need a login, which the agent may use without ever being handed the password. The page is the list; everything about one site
-// (setup progress, the manual agents read, learned skills, rules) lives in components/browser-access and opens from that site's "Manage" button.
+// (setup progress, the manual agents read, tools, rules) lives in components/browser-access and opens from that site's "Manage" button.
 
 const HOW: { icon: IconName; title: string; text: string }[] = [
   { icon: 'globe', title: 'Add the site', text: 'Give its name and login page address.' },

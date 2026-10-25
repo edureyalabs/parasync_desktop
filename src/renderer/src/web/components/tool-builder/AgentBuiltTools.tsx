@@ -22,6 +22,8 @@ export interface AgentBuiltTool {
   created_at:  string;
   enabled:     boolean;
   available_to_members: boolean;
+  access_id?:  string | null;
+  verified_at?: string | null;
 }
 
 const mono: React.CSSProperties = { fontFamily: "'IBM Plex Mono',monospace" };
@@ -35,7 +37,7 @@ export function useAgentBuiltTools(agentId: string) {
       const supabase = createClient();
       const { data } = await supabase
         .from('agent_created_tools')
-        .select('id, name, description, config, created_at, enabled, available_to_members')
+        .select('id, name, description, config, created_at, enabled, available_to_members, access_id, verified_at')
         .eq('agent_id', agentId)
         .order('created_at', { ascending: true });
       setTools((data as AgentBuiltTool[]) ?? []);
@@ -79,7 +81,9 @@ export function AgentBuiltRow({ tool, isShared, onSwitch, onDeleted }: {
         <div style={{ minWidth: 0, flex: '1 1 260px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
             <p style={{ ...mono, fontSize: '0.88rem', fontWeight: 500, color: C.ink, margin: 0 }}>{tool.name}</p>
-            <Chip tone="violet">Agent-built</Chip>
+            {tool.access_id
+              ? <><Chip tone="brass">Browser Access</Chip><Chip tone={tool.verified_at ? 'green' : 'slate'}>{tool.verified_at ? 'Verified' : 'Not verified'}</Chip></>
+              : <Chip tone="violet">Agent-built</Chip>}
             {!tool.enabled && <Chip>Off</Chip>}
           </div>
           <p style={{ fontSize: '0.8rem', color: C.soft, margin: 0, lineHeight: 1.6 }}>{tool.description || 'No description.'}</p>

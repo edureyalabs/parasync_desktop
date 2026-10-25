@@ -64,6 +64,8 @@ function stepLabel(s: Step): string {
 function runTitle(run: Run): string {
   if (run.kind === 'test') return 'Login test';
   if (run.kind === 'condense') return 'Condense';
+  if (run.kind === 'research') return 'Search for tools';
+  if (run.kind === 'build') return 'Building tools';
   if (run.kind === 'study') return run.trigger === 'auto' ? 'Automatic study of new tasks' : 'Study of past activity';
   return 'Setup';
 }
@@ -77,7 +79,7 @@ function runState(run: Run, live: boolean): string {
   return run.status === 'done' ? 'finished' : 'did not finish';
 }
 
-const FINISH_TITLES = ['Setup finished', 'Setup did not finish', 'Study finished', 'Study did not finish', 'Study did not start', 'finish'];
+const FINISH_TITLES = ['Setup finished', 'Setup did not finish', 'Study finished', 'Study did not finish', 'Study did not start', 'Search finished', 'Search did not finish', 'Search did not start', 'Build finished', 'Build did not start', 'finish'];
 
 export function Activity({ accessId, refreshKey }: { accessId: string; refreshKey: number }) {
   const [run, setRun] = useState<Run | null>(null);
@@ -130,7 +132,7 @@ export function Activity({ accessId, refreshKey }: { accessId: string; refreshKe
 
       {showRail && <ChainRail beads={phaseBeads(phaseReached(steps, run), run)} ariaLabel="Setup progress" />}
 
-      {!live && (finishing?.output_excerpt || ((run.kind === 'study' || run.kind === 'condense') && finishing?.error)) && (
+      {!live && (finishing?.output_excerpt || ((run.kind === 'study' || run.kind === 'condense' || run.kind === 'research' || run.kind === 'build') && finishing?.error)) && (
         <p style={{ fontSize: '0.78rem', color: finishing?.output_excerpt ? C.ink : C.red, margin: 0, lineHeight: 1.55 }}>{finishing?.output_excerpt || finishing?.error}</p>
       )}
 

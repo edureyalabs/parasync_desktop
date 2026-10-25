@@ -11,19 +11,19 @@ import { CredentialsModal } from './Modals';
 import { LocalCopyRow } from '@/components/local-copy/LocalCopy';
 import { ManualPanel } from './ManualPanel';
 import { RulesPanel } from './RulesPanel';
-import { SkillsPanel } from './SkillsPanel';
+import { ToolsPanel } from './ToolsPanel';
 import { Btn, Chip, ErrorText, IconTile, Spinner, post } from './ui';
 import { STATUS_TEXT, STATUS_TONE, type Access } from './types';
 
 // One site the agent may sign in to. Collapsed it is a single compact row: the site, its status, the one action that matters now, and the owner's switches.
-// "Manage" opens four tabs (Activity, Manual, Skills, Rules) so only one section is on screen at a time. While a setup is running the card opens itself on Activity.
+// "Manage" opens four tabs (Activity, Manual, Tools, Rules) so only one section is on screen at a time. While a setup is running the card opens itself on Activity.
 
-type TabId = 'activity' | 'manual' | 'skills' | 'rules';
+type TabId = 'activity' | 'manual' | 'tools' | 'rules';
 
 const TABS: { id: TabId; label: string; icon: IconName }[] = [
   { id: 'activity', label: 'Activity', icon: 'activity' },
   { id: 'manual', label: 'Manual', icon: 'book-open' },
-  { id: 'skills', label: 'Skills', icon: 'zap' },
+  { id: 'tools', label: 'Tools', icon: 'wrench' },
   { id: 'rules', label: 'Rules', icon: 'shield-check' },
 ];
 
@@ -41,7 +41,7 @@ export function AccessCard({ access, agentId, isShared, onUpdated, onDeleted }: 
   const [pending, setPending] = useState(false);
   const [showCreds, setShowCreds] = useState(false);
   const [logKey, setLogKey] = useState(0);
-  const [skillCount, setSkillCount] = useState<number | null>(null);
+  const [toolCount, setToolCount] = useState<number | null>(null);
   const working = access.status === 'onboarding' || access.status === 'awaiting_credentials';
   const open = expanded || working;
   const activeTab: TabId = working ? 'activity' : tab;
@@ -55,8 +55,8 @@ export function AccessCard({ access, agentId, isShared, onUpdated, onDeleted }: 
     const supabase = createClient();
     let cancelled = false;
     (async () => {
-      const { count } = await supabase.from('browser_access_skills').select('id', { count: 'exact', head: true }).eq('access_id', access.id);
-      if (!cancelled) setSkillCount(count ?? 0);
+      const { count: tools } = await supabase.from('agent_created_tools').select('id', { count: 'exact', head: true }).eq('access_id', access.id);
+      if (!cancelled) setToolCount(tools ?? 0);
     })();
     return () => { cancelled = true; };
   }, [access.id, logKey]);
@@ -129,7 +129,7 @@ export function AccessCard({ access, agentId, isShared, onUpdated, onDeleted }: 
           />
           <button
             type="button" className="ba-btn ba-outline" onClick={() => setExpanded(v => !v)} aria-expanded={open} disabled={working}
-            title={open ? 'Hide details' : 'Manual, skills, rules and activity'}
+            title={open ? 'Hide details' : 'Manual, tools, rules and activity'}
           >
             Manage
             <span style={{ display: 'inline-flex', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}><Icon name="chevron-down" size={12} /></span>
@@ -140,7 +140,7 @@ export function AccessCard({ access, agentId, isShared, onUpdated, onDeleted }: 
       {(access.status !== 'draft' || access.last_verified_at) && (
         <div style={{ padding: '0 1.05rem 0.75rem', display: 'flex', gap: '0.9rem', flexWrap: 'wrap', alignItems: 'center' }}>
           {access.profile && <Meta><Icon name="book-open" size={11} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />~{Math.round(access.coverage_pct ?? 0)}% explored · v{access.profile_version}</Meta>}
-          {skillCount !== null && <Meta><Icon name="zap" size={11} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />{skillCount} skill{skillCount === 1 ? '' : 's'}</Meta>}
+          {toolCount ? <Meta><Icon name="wrench" size={11} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />{toolCount} tool{toolCount === 1 ? '' : 's'}</Meta> : null}
           {access.last_verified_at && <Meta><Icon name="circle-check" size={11} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 4 }} />Login verified {new Date(access.last_verified_at).toLocaleDateString()}</Meta>}
           {access.status === 'failed' && access.last_error && <span style={{ fontSize: '0.74rem', color: C.red, minWidth: 0 }}>{access.last_error}</span>}
         </div>
@@ -153,14 +153,14 @@ export function AccessCard({ access, agentId, isShared, onUpdated, onDeleted }: 
             {TABS.map(t => (
               <button key={t.id} type="button" role="tab" aria-selected={activeTab === t.id} className="ba-tab" disabled={working && t.id !== 'activity'} onClick={() => setTab(t.id)}>
                 <Icon name={t.icon} size={13} />{t.label}
-                {t.id === 'skills' && skillCount ? <span style={{ fontFamily: MONO, fontSize: '0.64rem', opacity: 0.75 }}>{skillCount}</span> : null}
+                {t.id === 'tools' && toolCount ? <span style={{ fontFamily: MONO, fontSize: '0.64rem', opacity: 0.75 }}>{toolCount}</span> : null}
               </button>
             ))}
           </div>
           <div style={{ padding: '1rem 1.05rem 1.1rem' }}>
             {activeTab === 'activity' && <Activity accessId={access.id} refreshKey={logKey} />}
             {activeTab === 'manual' && <ManualPanel access={access} agentId={agentId} onUpdated={onUpdated} onStudyStarted={() => { setTab('activity'); setLogKey(k => k + 1); }} />}
-            {activeTab === 'skills' && <SkillsPanel accessId={access.id} />}
+            {activeTab === 'tools' && <ToolsPanel access={access} agentId={agentId} onChanged={() => setLogKey(k => k + 1)} onOpenActivity={() => setTab('activity')} />}
             {activeTab === 'rules' && <RulesPanel access={access} onUpdated={onUpdated} />}
           </div>
           {!working && access.fields.length > 0 && (
