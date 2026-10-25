@@ -6,28 +6,51 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { C, MONO } from '@/components/account/tokens';
 import { Btn, Chip, ErrorText, IconTile, Spinner, post } from './ui';
-import type { Access, LinkedToolRow, ProposalStatus, Run, ToolProposal } from './types';
+import type { Access, BuildPhase, LinkedToolRow, ProposalStatus, Run, ToolProposal } from './types';
 
 // The Tools tab: tools for this site that agents can call directly (the platform logs in for them). "Find tools" starts the tool researcher, which reads what
 // agents did here and the tools that already exist, and puts suggestions on a list. Each suggestion has its own Approve (with an optional note) and Delete.
 // An approved one is built by a builder agent, tested on the live site and switched on only when the test passed; it then moves to the History tab, still
 // linked to the tool it produced. Nothing is built without your approval.
 
-const PROPOSAL_COLUMNS = 'id, name, title, summary, kind, target_tool, motive, est_runtime, completed_at, runs_in, inputs, returns, changes_data, evidence, approach, sample_inputs, hint, status, remarks, tool_name, verification, error, created_at';
+const PROPOSAL_COLUMNS = 'id, name, title, summary, kind, target_tool, motive, est_runtime, completed_at, build_phase, build_progress, runs_in, inputs, returns, changes_data, evidence, approach, sample_inputs, hint, status, remarks, tool_name, verification, error, created_at';
 const TOOL_COLUMNS = 'id, name, description, enabled, runs_in, verified_at, fail_count, last_error, usage_count';
 const ON_LIST: ProposalStatus[] = ['suggested', 'proposed', 'failed'];
 const IN_PROGRESS: ProposalStatus[] = ['approved', 'building'];
 
+const PHASES: { id: BuildPhase; label: string }[] = [{ id: 'study', label: 'Study' }, { id: 'write', label: 'Write and test' }, { id: 'verify', label: 'Verify' }];
+
 const RUNS_IN_TEXT = { page: 'Runs in the page', http: "Calls the site's API" } as const;
 const small: React.CSSProperties = { fontSize: '0.72rem', color: C.soft, margin: 0, lineHeight: 1.55 };
 
-function SuggestionCard({ proposal, note, open, disabled, deleting, onNote, onToggleOpen, onApprove, onDelete }: {
+function PhaseRail({ proposal }: { proposal: ToolProposal }) {
+  const progress = proposal.build_progress;
+  if (!progress) return null;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }} aria-label="Build progress">
+      {PHASES.map((phase, index) => {
+        const entry = progress.phases[phase.id];
+        const tone = entry.status === 'done' ? 'green' : entry.status === 'failed' ? 'red' : entry.status === 'active' ? 'brass' : 'neutral';
+        return (
+          <span key={phase.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+            {index > 0 && <span style={{ color: C.muted, fontSize: '0.7rem' }}>›</span>}
+            <Chip tone={tone} dot={entry.status === 'active'} title={entry.attempts ? `${entry.attempts} attempt${entry.attempts === 1 ? '' : 's'}` : undefined}>{phase.label}</Chip>
+          </span>
+        );
+      })}
+      {progress.fix_rounds > 0 && <span style={small}>sent back {progress.fix_rounds}×</span>}
+    </div>
+  );
+}
+
+function SuggestionCard({ proposal, note, open, disabled, deleting, onNote, onToggleOpen, onApprove, onRestart, onDelete }: {
   proposal: ToolProposal; note: string; open: boolean; disabled: boolean; deleting: boolean;
-  onNote: (text: string) => void; onToggleOpen: () => void; onApprove: () => void; onDelete: () => void;
+  onNote: (text: string) => void; onToggleOpen: () => void; onApprove: () => void; onRestart: () => void; onDelete: () => void;
 }) {
   const building = IN_PROGRESS.includes(proposal.status);
   const upgrade = proposal.kind === 'upgrade';
-  const canApprove = ON_LIST.includes(proposal.status) && !upgrade;
+  const canApprove = ON_LIST.includes(proposal.status);
+  const resumeLabel = PHASES.find(p => p.id === proposal.build_phase)?.label;
   return (
     <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '0.7rem 0.85rem', display: 'grid', gap: '0.45rem' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
@@ -53,7 +76,8 @@ function SuggestionCard({ proposal, note, open, disabled, deleting, onNote, onTo
       <p style={{ fontSize: '0.78rem', color: C.body, margin: 0, lineHeight: 1.55 }}>{proposal.summary}</p>
       {proposal.motive && <p style={small}><b>Why:</b> {proposal.motive}</p>}
       {proposal.status === 'failed' && proposal.error && <ErrorText>{proposal.error}</ErrorText>}
-      {upgrade && <p style={small}>Upgrades are built by the next version of the builder; for now this stays on the list so you can review it.</p>}
+      {upgrade && proposal.status !== 'built' && <p style={small}>Approving an upgrade builds a new version beside the live tool; the live tool is replaced only when the new version has passed review.</p>}
+      {(building || proposal.status === 'failed' || proposal.build_progress) && <PhaseRail proposal={proposal} />}
 
       {open && (
         <div style={{ display: 'grid', gap: '0.45rem', borderTop: `1px solid ${C.lineSoft}`, paddingTop: '0.55rem' }}>
@@ -85,8 +109,11 @@ function SuggestionCard({ proposal, note, open, disabled, deleting, onNote, onTo
       {!building && (
         <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
           <Btn variant="danger" icon="trash" onClick={onDelete} disabled={deleting || disabled}>{deleting ? '…' : 'Delete'}</Btn>
+          {proposal.status === 'failed' && proposal.build_progress && (
+            <Btn icon="refresh-cw" onClick={onRestart} disabled={disabled} title="Throw away the saved recipe and draft and build it from the start.">Start over</Btn>
+          )}
           <Btn variant="primary" size="md" icon="hammer" onClick={onApprove} disabled={disabled || !canApprove}>
-            {proposal.status === 'failed' ? 'Approve again' : 'Approve'}
+            {proposal.status === 'failed' ? (resumeLabel ? `Retry from ${resumeLabel.toLowerCase()}` : 'Approve again') : 'Approve'}
           </Btn>
         </div>
       )}
@@ -157,10 +184,11 @@ export function ToolsPanel({ access, agentId, onChanged }: {
     load();
   };
 
-  const approve = async (p: ToolProposal) => {
+  const approve = async (p: ToolProposal, restart = false) => {
+    if (restart && !window.confirm('Throw away the saved recipe and draft and build this tool from the start?')) return;
     setBusy(`approve-${p.id}`);
     setError('');
-    const result = await post(`/api/agents/${agentId}/browser-access/${access.id}/tools/build`, { selections: [{ id: p.id, remarks: (notes[p.id] ?? '').trim() }] });
+    const result = await post(`/api/agents/${agentId}/browser-access/${access.id}/tools/build`, { selections: [{ id: p.id, remarks: (notes[p.id] ?? '').trim() }], restart });
     setBusy(null);
     if (!result.ok) { setError(result.error || 'Could not start the build.'); return; }
     onChanged();
@@ -239,7 +267,7 @@ export function ToolsPanel({ access, agentId, onChanged }: {
               <SuggestionCard
                 key={p.id} proposal={p} note={notes[p.id] ?? ''} open={openId === p.id} disabled={locked} deleting={busy === `delete-${p.id}`}
                 onNote={text => setNotes(n => ({ ...n, [p.id]: text }))} onToggleOpen={() => setOpenId(openId === p.id ? null : p.id)}
-                onApprove={() => approve(p)} onDelete={() => remove(p)}
+                onApprove={() => approve(p)} onRestart={() => approve(p, true)} onDelete={() => remove(p)}
               />
             ))}
           </div>
