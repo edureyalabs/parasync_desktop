@@ -5,6 +5,16 @@ Read this first in any new session that touches the Windows desktop app, `parasy
 Companion files: `docs/HANDOFF.md` (project status + working rules), `parasync_bemain/local-execution.md` (bemain-side detail), `parasync_localrunner/README.md`.
 Last updated 2026-10-25.
 
+## 0. Four repos ship together (read before any change)
+Local execution spans `parasync_frontmain` (web + `/api/*` + SQL migrations), `parasync_bemain` (the brain; decides what runs where), `parasync_desktop` (the Windows app) and `parasync_localrunner` (the Linux box image). A change in one often needs a matching change in another. Rules:
+1. **Find the wire first.** Before changing any shared contract (a `desktop_jobs` payload field, `desktop_devices` column, `held_secrets`, a `/api/*` route the desktop calls, a slot in `frontmain/components/local-copy/LocalCopy.tsx`, the runner image version), list which of the four repos read or write it. Change all sides in the same piece of work.
+2. **Order of release:** (1) SQL migration, applied and checked, additive only; (2) bemain (Fly auto-deploys on push to `main`) and frontmain (Vercel auto-deploys), both written so the OLD desktop/box still works; (3) localrunner release `vX.Y.Z` (the user creates it; PCs update their box by themselves), only if `runner/` or `image/` changed; (4) desktop: bump `package.json` version, then the user runs Actions -> Release. Never ship a desktop that needs a server change that is not live yet.
+3. **Backward compatible both ways.** Old desktop + new server, and new desktop + old server, must degrade to "runs in the cloud", never to a failed run. Gate new behaviour on a version the device reports (`app_version`, `runner_version`) when the old side cannot understand it.
+4. **After touching frontmain screens the desktop copies,** run `node scripts/sync-web.ts ../parasync_frontmain` in the desktop repo, then `npm run typecheck`, `npm test`, `npm run build`, and the UI sweep (`scripts/ui-test/sweep.ts`). The desktop never edits `src/renderer/src/web/` by hand.
+5. **Tests per repo before saying done:** bemain `python3 -m pytest tests -q`; desktop `npm run typecheck && npm test && npm run build`; localrunner `python3 -m pytest -q tests`; frontmain `npm run lint`. Push each repo to `main`; commit messages end with the usual two attribution lines.
+6. **Docs:** update this file's state log (bottom) and the repo-local pointer files in the same change.
+7. **Not provable here:** anything needing a real Windows PC (DPAPI, the real WSL box, the broker). Say so in the report; the user tests it.
+
 ## 1. What it is, in one paragraph
 Agents' tool code (code_executor, Tool Builder tools, agent-built tools, and — when enabled — browser sessions) normally runs in AWS Lambda MicroVMs (the "cloud",
 metered per run). If the person who is chatting has the Windows desktop app open, signed in, switched on and **Ready**, bemain sends that code to **their own PC**
@@ -135,3 +145,5 @@ realtime push instead of polling · macOS/Linux desktop · scheduled/background 
 - 2026-10-26 — SECRETS ON THE PC built (desktop 0.6.0, localrunner image 0.3.0, bemain `local_secrets.py`, migration `20261026020000_device_held_secrets.sql` APPLIED). Tests: desktop 61, bemain 1038, localrunner 46+; the screens were exercised in the real Electron app against fakes (`scripts/ui-test/sweep.ts`). NOT yet proven on a real PC: Windows DPAPI encryption of the vault, the supervisor/broker inside the real WSL box (image 0.3.0 not published yet), a real PC-only secret used by a tool. Order: CI green on localrunner → publish `v0.3.0` → release desktop 0.6.0.
 
 - 2026-10-26 (desktop 0.7.0): secrets on the PC redesigned. Name visible on both sides, value kept separately (cloud, PC, or both); no transfer, no comparison, no versions; PC first, then cloud, else fail. Managed on the Secrets tab / My Keys / Browser Access (web slots answered by `shims/localCopy.tsx`); About is only a list. Version label moved clear of Sign out; Account menu has "About this app". bemain `local_secrets.holds()` ignores versions. Details: `docs/LOCAL_SECRETS.md`.
+
+- 2026-10-26: added section 0 (the four repos ship together). User confirmed secrets run locally on a real PC (Axentra keys in the desktop app, calls executed locally).

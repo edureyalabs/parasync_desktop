@@ -40,3 +40,5 @@ while its self-test passes; never loosen who may claim a job (the database funct
 mailbox tables, routing rules, trust rules, timings, release steps, debugging cookbook) and has a state log at the bottom — append to it when you change things.
 
 **Secrets kept on the PC** (vault, local broker, PC-only secrets): `docs/LOCAL_SECRETS.md` — read it before touching `src/main/vault/`, `src/main/runner/localSecrets.ts`, `LocalSecretsCard.tsx` or `lib/localCopy.ts`. The page may add and remove copies but must never be able to read one back; keep it that way. The controls live in `shims/localCopy.tsx` (the answer to the web's `components/local-copy/LocalCopy.tsx` slots), not in the About page.
+
+**Four repos ship together** (frontmain, bemain, desktop, localrunner): a change to any shared contract needs the matching change in the others, released in order migration -> bemain/frontmain -> localrunner -> desktop, and old/new must degrade to the cloud. Rules: `parasync_desktop/docs/LOCAL_EXECUTION.md` section 0.
