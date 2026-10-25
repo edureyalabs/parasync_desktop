@@ -24,10 +24,10 @@ export function isLive(job: BrowserJob): boolean {
 }
 
 const GUIDE_WRITE = new Set(['write_site_guide', 'set_guide_overview']);
-const GUIDE_READ = new Set(['read_site_guide', 'read_node_learning', 'read_exploration_call', 'read_source_call', 'read_browser_call', 'read_tool']);
-const SAVES = new Set(['save_draft', 'submit_plan', 'submit_draft', 'pass_tool', 'send_back', 'suggest_tool', 'revise_suggestion']);
-const PHASE = /^(Study|Write|Verify) · (.+)$/;
-const PHASE_TONE: Record<string, 'plan' | 'repair' | 'neutral'> = { Study: 'plan', Write: 'neutral', Verify: 'repair' };
+const GUIDE_READ = new Set(['read_site_guide', 'read_node_learning', 'read_exploration_call', 'read_source_call', 'read_browser_call', 'read_tool', 'show_canvas', 'probe']);
+const SAVES = new Set(['save_draft', 'submit_plan', 'submit_draft', 'pass_tool', 'send_back', 'suggest_tool', 'revise_suggestion', 'set_contract', 'set_step', 'set_helpers', 'drop_step', 'submit_tool']);
+const PHASE = /^(Plan|Build|Check|Study|Write|Verify) · (.+)$/;
+const PHASE_TONE: Record<string, 'plan' | 'repair' | 'neutral'> = { Plan: 'plan', Build: 'neutral', Check: 'repair', Study: 'plan', Write: 'neutral', Verify: 'repair' };
 
 /** A builder step's title is "Phase · what"; every other job's is just "what". */
 function parts(step: BrowserJobStep): { phase: string | null; rest: string } {
@@ -60,7 +60,8 @@ function shortLabel(step: BrowserJobStep): string {
   const { rest } = parts(step);
   const name = stepName(step).replace(/^browser_access_.*/, 'open site');
   const tail = rest.includes(':') ? rest.slice(rest.indexOf(':') + 1).trim() : '';
-  const base = (tail && !SAVES.has(name) && name !== 'run_draft' ? tail : name).replace(/_/g, ' ');
+  const base = (tail && !SAVES.has(name) && !['run_draft', 'run_step'].includes(name) ? tail : name).replace(/_/g, ' ');
+  if (tail && ['set_step', 'run_step'].includes(name)) return (tail.length > 18 ? tail.slice(0, 17) + '…' : tail).replace(/_/g, ' ');
   return base.length > 18 ? base.slice(0, 17) + '…' : base;
 }
 

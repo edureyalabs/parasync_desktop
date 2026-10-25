@@ -18,7 +18,7 @@ const TOOL_COLUMNS = 'id, name, description, enabled, runs_in, verified_at, fail
 const ON_LIST: ProposalStatus[] = ['suggested', 'proposed', 'failed'];
 const IN_PROGRESS: ProposalStatus[] = ['approved', 'building'];
 
-const PHASES: { id: BuildPhase; label: string }[] = [{ id: 'study', label: 'Study' }, { id: 'write', label: 'Write and test' }, { id: 'verify', label: 'Verify' }];
+const PHASES: { id: BuildPhase; label: string }[] = [{ id: 'study', label: 'Plan' }, { id: 'write', label: 'Build' }, { id: 'verify', label: 'Final check' }];
 
 const RUNS_IN_TEXT = { page: 'Runs in the page', http: "Calls the site's API" } as const;
 const small: React.CSSProperties = { fontSize: '0.72rem', color: C.soft, margin: 0, lineHeight: 1.55 };
@@ -50,7 +50,6 @@ function SuggestionCard({ proposal, note, open, disabled, deleting, onNote, onTo
   const building = IN_PROGRESS.includes(proposal.status);
   const upgrade = proposal.kind === 'upgrade';
   const canApprove = ON_LIST.includes(proposal.status);
-  const resumeLabel = PHASES.find(p => p.id === proposal.build_phase)?.label;
   return (
     <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 10, padding: '0.7rem 0.85rem', display: 'grid', gap: '0.45rem' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
@@ -110,10 +109,10 @@ function SuggestionCard({ proposal, note, open, disabled, deleting, onNote, onTo
         <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
           <Btn variant="danger" icon="trash" onClick={onDelete} disabled={deleting || disabled}>{deleting ? '…' : 'Delete'}</Btn>
           {proposal.status === 'failed' && proposal.build_progress && (
-            <Btn icon="refresh-cw" onClick={onRestart} disabled={disabled} title="Throw away the saved recipe and draft and build it from the start.">Start over</Btn>
+            <Btn icon="refresh-cw" onClick={onRestart} disabled={disabled} title="Throw away the saved canvas and build this tool from the start.">Start over</Btn>
           )}
           <Btn variant="primary" size="md" icon="hammer" onClick={onApprove} disabled={disabled || !canApprove}>
-            {proposal.status === 'failed' ? (resumeLabel ? `Retry from ${resumeLabel.toLowerCase()}` : 'Approve again') : 'Approve'}
+            {proposal.status === 'failed' ? (proposal.build_progress && proposal.build_phase && proposal.build_phase !== 'study' ? 'Continue the build' : 'Approve again') : 'Approve'}
           </Btn>
         </div>
       )}
@@ -185,7 +184,7 @@ export function ToolsPanel({ access, agentId, onChanged }: {
   };
 
   const approve = async (p: ToolProposal, restart = false) => {
-    if (restart && !window.confirm('Throw away the saved recipe and draft and build this tool from the start?')) return;
+    if (restart && !window.confirm('Throw away the saved canvas and build this tool from the start?')) return;
     setBusy(`approve-${p.id}`);
     setError('');
     const result = await post(`/api/agents/${agentId}/browser-access/${access.id}/tools/build`, { selections: [{ id: p.id, remarks: (notes[p.id] ?? '').trim() }], restart });
