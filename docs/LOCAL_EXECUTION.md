@@ -45,7 +45,10 @@ Who is "the person": the billing actor's `user_id` = the chat's creator (`chats.
 
 ## 5. The desktop executor (`src/main/runner/`)
 - `executor.ts` — pure logic (no Electron imports; tested alone by `npm test`). State machine `off → checking → ready ⇄ busy`, plus `no-wsl`, `needs-install`, `installing`, `error`.
-  Loop (`tick`): WSL present? distro installed? self-test (canary) every 5 min and when entering `checking` → heartbeat (30 s; retried at most every 10 s on failure) → list queued jobs for this device → claim (RPC) → run → finish (RPC).
+  Loop (`tick`): WSL present? distro installed? (asked of `wsl.exe` at most every 30 s while stable — it is a real process) → self-test (canary) every 5 min and when entering `checking` → when idle: image update check, browser self-test → heartbeat (30 s; retried at most every 10 s on failure) →
+  list queued jobs for this device → claim (RPC) → run **in the background** (up to 4 jobs in parallel; `drain()` waits for them in tests) → finish (RPC). Poll is 1.5 s idle, 0.4 s while a job or browser is active or a job finished in the last 20 s.
+  **Image self-update** (`maybeUpdate`, every 6 h and at start, only while idle and with no browser open): fetch the public manifest; if its version is newer than the stored `runner.version`, tell the cloud not-ready, download + sha256-verify the new rootfs FIRST, only then `wsl --unregister` the old distro and import the new one (`installFromManifest(..., replace=true)` in `index.ts`), then `afterInstall()` re-tests everything.
+  If the replace fails after the old box was removed, the next tick sees no box (`needs-install`) and the person can press Install.
   Per-account: device id and the on/off switch are keyed by user id. Sign-out or account switch sends a heartbeat `ready=false` first (best effort, old token still held). Quit sends the same (3 s cap). While a job runs: lease touch + heartbeat every 30 s.
 - `wsl.ts` — everything touching `wsl.exe`. Job command (`jobArgs`): `wsl.exe -d ParasyncRunner -u root --exec sh -c '<prelude>; exec runuser -u runner -- env -u WSL_INTEROP timeout --signal=KILL N python3 /opt/runner/run_job.py'`;
   job JSON on stdin; the answer is one line `__PARASYNC_JOB_RESULT__{json}` on stdout. Prelude (root, before any agent code): `echo -1 > /proc/sys/fs/binfmt_misc/WSLInterop; chmod 700 /run/WSL`.
@@ -57,8 +60,8 @@ Who is "the person": the billing actor's `user_id` = the chat's creator (`chats.
 - IPC channels `runner:get|set-enabled|install|session|status` (`src/shared/ipc.ts`); types/constants in `src/shared/runner.ts`.
 
 ## 6. Timing numbers (so symptoms are easy to read)
-Poll 1.5 s idle (faster while active, see browser work) · claim latency seen live 0.3–2.5 s · typical run 1–6 s · heartbeat 30 s · device "fresh" 60 s · cloud wait for a claim 6 s ·
-lease 90 s renewed every 30 s · self-test every 5 min · hourly cleanup at :23.
+Poll 1.5 s idle, 0.4 s while active · claim latency seen live 0.3–2.5 s (before the faster poll) · typical run 1–6 s · heartbeat 30 s · device "fresh" 60 s · cloud wait for a claim 6 s (code runs, browser open), 20 s (a call in an existing browser) ·
+lease 90 s renewed every 30 s · code self-test every 5 min · browser self-test every 30 min · image update check every 6 h · hourly DB cleanup at :23 · up to 4 parallel jobs and 3 browsers per PC.
 
 ## 7. The sealed box — what is and is not true
 `image/wsl.conf` sets automount off, interop off, appendWindowsPath off, default user `runner`. **Verified on a real PC:** automount and appendWindowsPath are honoured (no `/mnt/c`, no `cmd.exe` on PATH);
@@ -83,15 +86,30 @@ Network egress from the box is open (same as the cloud MicroVMs).
 - **bemain**: push to `main`; Fly deploy workflow runs (check its job log — a "success" can still hide a skipped deploy, see `deployment.md`). Live backend is whatever `app_settings.runner_url` says (currently Fly).
 - **Migrations**: files in `parasync_frontmain/supabase/migrations/`; applying through the Supabase tool can hang on its confirmation prompt (statements with `delete`/`drop`) — apply in small pieces via `execute_sql`, or have the user run the SQL editor. Never put `DROP` in a migration applied through the tool.
 
-## 10. Browser sessions (status at the end of this document's last edit)
-See §13 for the exact current state; design in short: a session is ONE long-lived process in the box (`browser_host.py`, one per session, Playwright-launched Chromium over a pipe — no network port),
-driven by the app over stdio JSON lines. bemain keeps using `agent_browser_sessions`; a local session's `daytona_sandbox_id` is `local:<device_id>:<session uuid>` and `microvm_endpoint` is `local`.
-`microvm_sandbox.open_session/call_session/close_session` are the seam: ids with the `local:` prefix are delegated to `desktop_browser.py`. Local sessions are unmetered; Browser Access login/onboarding sessions
-(they carry credentials) are always opened in the cloud (`allow_local=False`). If the PC goes away mid-session the session is reported gone (never moved to the cloud — page state cannot move).
+## 10. Browser sessions (built 2026-10-25, off until switched on)
+**Shape.** A browser session on a PC is ONE long-lived process in the Linux box: `runner/browser_host.py` (one per session), launched by the app as a child `wsl.exe` process (same root-prelude/`runuser` start-up as a job, see `browserHostArgs` in `wsl.ts`,
+plus `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`). It starts headless Chromium through synchronous Playwright (in-memory profile, nothing written to disk, **no network port**: Playwright talks to Chromium over a pipe) and then answers
+requests the app writes to its stdin, one JSON line each (`exec` / `ping` / `close`), replying with `__PARASYNC_BROWSER__{json}` lines (`ready`, `response`, `fatal`). An `exec` runs the model's script in-process with `browser`, `context`, `page` bound — the same
+script contract as the cloud (`result` variable, files in, new/changed files out as base64, per-call env vars only while the call runs, stdout captured). The time limit is a `SIGALRM`-raised `BaseException` (scripts cannot swallow it); if a timeout leaves
+Playwright unusable the host reports `fatal` and exits. The process also exits when the app closes the pipe (quit, sign-out, crash) and after 45 min idle.
+**App side** (`src/main/runner/browserHost.ts`, no Electron imports): `BrowserHosts` keeps a map of session id → host process, with at most `maxBrowserSessions` (3) open; a session that does not exist or died answers `{ok:false, session_gone:true}`. The executor
+(`executor.ts`) handles three job kinds in the same mailbox: `browser_open {session_id}`, `browser_exec {session_id, code, files, env_vars, timeout}`, `browser_close {session_id}`; a browser job is refused unless this PC passed the **browser self-test**
+(`check()` in `index.ts`: open a browser, load a data: page, read its title, close it; run every 30 min and never while a browser is open; needs image ≥ 0.2.0). Heartbeats carry `browser_ready`.
+**Routing (bemain)** — `desktop_browser.py`: `open_new_session(..., allow_local=True)` first asks `try_open()`; it returns None (→ cloud MicroVM, exactly as before) unless BOTH `local_execution_enabled` and `local_browser_enabled` are `'true'` and the person has a device that is
+`local_enabled`, `ready`, `browser_ready` and seen in the last 60 s; a PC that does not claim the open within 6 s is cancelled → cloud; an open that fails after being claimed → cloud (nothing happened) and a `browser_close` is queued. A local session is stored in
+`agent_browser_sessions` like any other with `daytona_sandbox_id = 'local:<device_id>:<session uuid>'`, `microvm_endpoint = 'local'`. The seam is `microvm_sandbox.call_session/close_session`: an id with the `local:` prefix goes to `desktop_browser.call/close`
+(so `browser_execute`, the probes, the idle sweep and the planner all work unchanged). **A call RAISES when the PC is gone** (unclaimed in 20 s, lost mid-call, device deleted, `session_gone`) and `browser_execute` already turns an exception into "session gone, open a new one";
+a local session is NEVER moved to the cloud (page state cannot move).
+**Rules.** Local sessions are unmetered (`browser_execute` skips the gate/charge for `local:` ids; `open_new_session` skips gate + `record_browser_open`; `meter_session_lifetime` skips them). Sessions that carry credentials — Browser Access **login** and **onboarding**
+(`browser_access/login.py`, `onboarding.py`) — are always opened in the cloud (`allow_local=False`) because the owner's saved logins must not be sent to a member's PC. `desktop_browser.call` refuses any call whose env vars are not broker-mode, and more than 2 MB of input files.
+**Switching it on:** apply `20261026010000_desktop_browser.sql` (done 2026-10-25), publish image ≥ 0.2.0 (tag `v0.2.0`), release a desktop ≥ 0.5.0, let the PC update its Linux box and pass the browser self-test (the card shows "Browsers: Ready"), then set `app_settings.local_browser_enabled = 'true'`.
+**Latency note:** each browser step is a mailbox round trip (poll 0.4 s while work is flowing, plus the claim/finish calls), so expect roughly 1–2 s of overhead per call versus the cloud.
+**Residue:** Chromium on the PC reaches the internet with no filter (like the cloud). Downloads and files live only under `/tmp/parasync-browser/<session>/work` in the box and are returned as output files.
 
 ## 11. Known limits / not built
-Per-agent owner consent for running agent code on a member's PC (deliberately deferred; "handle it a different way") · serving two accounts at once on one PC · files over 2 MB in a local run · Windows code signing ·
-realtime push instead of polling · macOS/Linux desktop.
+Per-agent owner consent for running agent code on a member's PC (deliberately deferred; "handle it a different way") · serving two accounts at once on one PC · files over 2 MB in a local run or browser call · Windows code signing ·
+realtime push instead of polling · macOS/Linux desktop · scheduled/background work that must run while the PC is off (falls to the cloud by design).
+**Billing decision (2026-10-25, the owner's):** the compute limits/charges (800 runs personal, 1600 private, overflow price) exist only to cover cloud costs, so **local runs and local browser sessions are never counted or charged**. Cloud runs stay metered as always.
 
 ## 12. Debugging cookbook
 - "Count is 0 / nothing runs locally": check `desktop_devices` for that **user_id** (ready, local_enabled, last_seen within 60 s); check `app_settings.local_execution_enabled`; check bemain is the new build.
@@ -105,4 +123,6 @@ realtime push instead of polling · macOS/Linux desktop.
 - 2026-10-24/25 — code runs local: built, deployed, proven on a real PC (claim 0.3–2.5 s, scheduled/chain/planner runs local, cloud fallback when app closed, sign-out mid-run handled).
 - 2026-10-25 — desktop 0.4.4, localrunner image 0.1.0 (reportlab pinned 4.2.5), bemain `30961f6`+. Billing: local = unmetered (tests added).
 - 2026-10-25 — cloud sandbox `reportlab==4.2.5` pin committed in `parasync_sandbox` (applies at next image build, running image unchanged).
-- 2026-10-25 — IN PROGRESS: runner self-update, browser sessions (see the commit log of `parasync_localrunner`, `parasync_desktop`, `parasync_bemain` for what landed).
+- 2026-10-25 — built (tests green; not yet proven on a real PC): browser sessions end to end (localrunner image 0.2.0 with Chromium, `browser_host.py`; app 0.5.0 `browserHost.ts`/executor; bemain `desktop_browser.py` + seam + no-metering; migration `20261026010000_desktop_browser.sql` APPLIED, flag `local_browser_enabled='false'`),
+  image self-update in the app, parallel jobs, cached `wsl.exe` checks, billing tests. Order to turn browsers on: CI green for localrunner `main` → publish release `v0.2.0` → release desktop 0.5.0 → PC updates its box and shows "Browsers: Ready" → set `local_browser_enabled='true'` → test a task that uses a browser.
+- Open questions to verify on the first real run: Playwright 1.49.1 + Chromium inside WSL (CI proves the image; the PC proves WSL), `runuser`/`--exec` start-up for the host, browser step latency, behaviour when the PC sleeps mid-session.
