@@ -68,8 +68,8 @@ const TOOL_GROUPS: ToolGroup[] = [
   },
   {
     label: 'Browser Automation', category: 'Computer use', iconKey: 'browser_execute',
-    description: 'A real, persistent headless browser this agent can drive with Playwright scripts — navigate JS-rendered sites, fill and submit forms, scrape content, take screenshots. Session state (cookies, logins, open tabs) persists across calls.',
-    keys: ['browser_open_session', 'browser_execute', 'browser_close_session'],
+    description: 'A real, persistent headless browser this agent can drive with Playwright scripts — navigate JS-rendered sites, fill and submit forms, scrape content, take screenshots. It can also look at any page (controls, forms, tables, dialogs, the requests the page makes) and make one move at a time, seeing what each move caused. Session state (cookies, logins, open tabs) persists across calls.',
+    keys: ['browser_open_session', 'browser_execute', 'browser_look', 'browser_act', 'browser_close_session'],
   },
   {
     label: 'Email', category: 'Messaging', iconKey: 'send_email',

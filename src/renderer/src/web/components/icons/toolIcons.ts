@@ -25,6 +25,8 @@ const EXACT: Record<string, ToolIconSpec> = {
   code_executor: { name: 'terminal', color: SLATE },
   browser_open_session: { name: 'globe', color: TEAL },
   browser_execute: { name: 'mouse-pointer-click', color: TEAL },
+  browser_look: { name: 'scan-search', color: TEAL },
+  browser_act: { name: 'mouse-pointer-click', color: TEAL },
   browser_close_session: { name: 'circle-x', color: TEAL },
   send_email: { name: 'mail', color: BRASS },
   whatsapp_chats: { name: 'whatsapp', color: WHATSAPP },
