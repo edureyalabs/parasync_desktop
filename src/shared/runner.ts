@@ -22,6 +22,8 @@ export const RUNNER_CONFIG = {
   minBrowserRunner: '0.2.0',
   /** The first Linux image that can hold secrets away from the script (the local broker). */
   minBrokerRunner: '0.3.0',
+  /** The first Linux image whose browser runs the cloud's browser code: look, act, the resident watcher, events on every script (parasync_localrunner 0.4.0). */
+  minSensesRunner: '0.4.0',
   /** Most browsers one PC keeps open at once, and most jobs it runs at once. */
   maxBrowserSessions: 3,
   maxParallelJobs: 4,
@@ -40,6 +42,7 @@ export function compareVersions(a: string, b: string): number {
 
 export const runnerHasBrowser = (version: string | null): boolean => !!version && compareVersions(version, RUNNER_CONFIG.minBrowserRunner) >= 0;
 export const runnerHasBroker = (version: string | null): boolean => !!version && compareVersions(version, RUNNER_CONFIG.minBrokerRunner) >= 0;
+export const runnerHasSenses = (version: string | null): boolean => !!version && compareVersions(version, RUNNER_CONFIG.minSensesRunner) >= 0;
 
 export type RunnerState =
   | 'off'            // the person has not switched it on
@@ -64,6 +67,8 @@ export interface RunnerStatus {
   runnerVersion?: string;
   browser?: 'unavailable' | 'checking' | 'ready' | 'error';
   browserNote?: string;
+  /** Whether this PC's browsers can look at a page and act on it like the cloud's (image 0.4.0+). */
+  senses?: boolean;
   /** Browsers open on this PC right now. */
   browserSessions?: number;
   /** Code jobs (tool runs) running in the Linux box right now. */

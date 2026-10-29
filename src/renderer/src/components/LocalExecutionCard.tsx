@@ -43,6 +43,12 @@ export function LocalExecutionCard() {
             </span>
           </div>
         ) : null}
+        {status.browser === 'ready' ? (
+          <div style={row}>
+            <span style={{ color: '#9E9C8F' }}>Look and act in browsers</span>
+            <span style={{ color: status.senses ? '#3F6B4A' : '#67655A' }}>{status.senses ? 'Ready' : 'The Linux box updates itself to 0.4.0 while the app is idle'}</span>
+          </div>
+        ) : null}
         <div style={row}><span style={{ color: '#9E9C8F' }}>Running now</span><span>{status.sandboxRunning ?? 0} tool run(s) · {status.browserSessions ?? 0} browser(s)</span></div>
         <div style={{ ...row, borderBottom: 'none' }}><span style={{ color: '#9E9C8F' }}>Tool runs here</span><span>{status.jobsRun ?? 0}</span></div>
       </div>

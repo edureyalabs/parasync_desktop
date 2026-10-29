@@ -54,18 +54,23 @@ export function startRunner(getWindow: () => BrowserWindow | null): void {
     size: () => hosts.size(),
     open: (id) => hosts.open(id),
     exec: (id, request) => hosts.exec(id, request),
+    senses: (id, op, body) => hosts.senses(id, op, body),
     close: (id) => hosts.close(id),
     closeAll: () => hosts.closeAll(),
-    // The self-test: a real browser starts, loads a page and gives it back, then goes away.
-    check: async () => {
+    // The self-test: a real browser starts, loads a page and gives it back (and, on an image that has them, describes it), then goes away.
+    check: async (withSenses) => {
       const id = randomUUID();
       try {
         const opened = await hosts.open(id);
         if (!opened.ok) return { ok: false, note: opened.error ?? 'The browser did not start.' };
         const outcome = await hosts.exec(id, { code: "page.goto('data:text/html,<title>ok</title>')\nresult = page.title()", files: {}, env_vars: {}, timeout: 60 });
-        return outcome['ok'] === true && outcome['result'] === 'ok'
+        if (outcome['ok'] !== true || outcome['result'] !== 'ok') return { ok: false, note: String(outcome['error'] ?? 'The test page did not load.') };
+        if (!withSenses) return { ok: true };
+        // Look and act are what the cloud will send here next, so a PC that cannot do them is not browser-ready (fail closed, like the sealed-box test).
+        const look = await hosts.senses(id, 'look', { settle: false });
+        return look['ok'] === true && String(look['report'] ?? '').includes('PAGE')
           ? { ok: true }
-          : { ok: false, note: String(outcome['error'] ?? 'The test page did not load.') };
+          : { ok: false, note: `The page description test failed: ${String(look['error'] ?? 'no report').slice(0, 200)}` };
       } finally {
         await hosts.close(id);
       }

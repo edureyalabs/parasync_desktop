@@ -99,18 +99,31 @@ export class BrowserHosts {
 
   /** Runs one script in a browser. A session that is not here (the app restarted, the browser crashed) is reported gone, never faked. */
   async exec(sessionId: string, request: ExecRequest): Promise<Outcome> {
+    return await this.send(sessionId, { op: 'exec', code: request.code, files: request.files, env_vars: request.env_vars, timeout: request.timeout }, Math.max(1, request.timeout) + 30);
+  }
+
+  /**
+   * `look` (describe the page) or `act` (one move, and what it caused): the cloud's own two ways of using a browser without a script. `body` is the
+   * request exactly as the cloud takes it (target, action, query, allowed_hosts, ...); the host's own limits are 60 s and 120 s.
+   */
+  async senses(sessionId: string, op: 'look' | 'act', body: Record<string, unknown>): Promise<Outcome> {
+    const { id: _id, op: _op, ...rest } = body;
+    return await this.send(sessionId, { ...rest, op }, (op === 'look' ? 60 : 120) + 30);
+  }
+
+  /** One request to a session's host and its answer, or "gone" / "did not answer in time". */
+  private async send(sessionId: string, message: Record<string, unknown>, limitSeconds: number): Promise<Outcome> {
     const session = this.sessions.get(sessionId);
     if (!session || session.exited) return gone('This browser no longer exists on this PC (it closed when the app restarted or stopped).');
     const id = String(session.nextId++);
-    const limitMs = (Math.max(1, request.timeout) + 30) * 1000;
     return await new Promise<Outcome>((resolve) => {
       const timer = setTimeout(() => {
         session.pending.delete(id);
         resolve({ ok: false, error: 'The browser did not answer in time.', stdout: '', output_files: {} });
-      }, limitMs);
+      }, limitSeconds * 1000);
       session.pending.set(id, (outcome) => { clearTimeout(timer); resolve(outcome); });
       try {
-        session.proc.write(JSON.stringify({ id, op: 'exec', code: request.code, files: request.files, env_vars: request.env_vars, timeout: request.timeout }) + '\n');
+        session.proc.write(JSON.stringify({ ...message, id }) + '\n');
       } catch {
         clearTimeout(timer);
         session.pending.delete(id);

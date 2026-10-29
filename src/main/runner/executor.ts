@@ -4,7 +4,7 @@
 // Linux box and answered. Three kinds of work: a code run (its own short process), and the three browser verbs (open / exec / close) that
 // drive a long-lived browser process (browserHost.ts). It also keeps the Linux image up to date. Nothing here knows about Electron:
 // everything it touches is passed in, so it is tested on its own (scripts/tests/executor.test.ts).
-import { RUNNER_CONFIG, SEALED_CHECK_CODE, compareVersions, runnerHasBroker, runnerHasBrowser, type RunnerStatus } from '../../shared/runner';
+import { RUNNER_CONFIG, SEALED_CHECK_CODE, compareVersions, runnerHasBroker, runnerHasBrowser, runnerHasSenses, type RunnerStatus } from '../../shared/runner';
 import type { HeldMap } from '../../shared/vault';
 import { redactOutcome } from '../vault/redact';
 import type { Ref } from '../vault/vault';
@@ -23,10 +23,12 @@ export interface BrowserApi {
   size(): number;
   open(sessionId: string): Promise<{ ok: boolean; error?: string }>;
   exec(sessionId: string, request: { code: string; files: Record<string, string>; env_vars: Record<string, string>; timeout: number }): Promise<Record<string, unknown>>;
+  /** look / act: the cloud's page description and one-move actions (image 0.4.0+). */
+  senses(sessionId: string, op: 'look' | 'act', body: Record<string, unknown>): Promise<Record<string, unknown>>;
   close(sessionId: string): Promise<void>;
   closeAll(): Promise<void>;
-  /** Self-test: start a browser, load a page, read it back, close it. */
-  check(): Promise<{ ok: boolean; note?: string }>;
+  /** Self-test: start a browser, load a page, read it back, close it; with `senses` also look at the page. */
+  check(senses: boolean): Promise<{ ok: boolean; note?: string }>;
 }
 
 /** Keeping the Linux image current: what is newest, and how to replace the installed one with it. */
@@ -289,7 +291,7 @@ export class Executor {
     if (this.browserReady && now - this.lastBrowserCanaryAt < RUNNER_CONFIG.browserCanaryEveryMs) return;
     if (!this.browserReady && this.lastBrowserCanaryAt !== 0 && now - this.lastBrowserCanaryAt < RUNNER_CONFIG.canaryEveryMs) return; // a failing one: retry like the code self-test
     this.set({ ...this.status, browser: 'checking', browserNote: undefined });
-    const result = await browser.check();
+    const result = await browser.check(runnerHasSenses(this.runnerVersion));
     this.lastBrowserCanaryAt = now;
     this.browserReady = result.ok;
     this.set({ ...this.status, browser: result.ok ? 'ready' : 'error', browserNote: result.ok ? undefined : (result.note ?? 'The browser self-test failed.').slice(0, 300) });
@@ -515,6 +517,17 @@ export class Executor {
       if (JSON.stringify(outcome).length > MAX_RESULT_BYTES) return fail('The result was too large to send back (over 20 MB).');
       return { ok, result: outcome, error: ok ? null : String(outcome['error'] ?? 'The script failed.').slice(0, 1900) };
     }
+    if (kind === 'browser_look' || kind === 'browser_act') {
+      if (!runnerHasSenses(this.runnerVersion)) return fail('The Linux box on this PC has to update first (look and act need image 0.4.0); it updates itself while the app is idle.');
+      const { kind: _kind, session_id: _session, ...body } = p;
+      let outcome = await browser.senses(sessionId, kind === 'browser_look' ? 'look' : 'act', body);
+      // A browser that was logged in with a saved login: what the page shows (a report, a path, a title) never carries that login or the session's tokens out.
+      const session = this.scrub.get(sessionId);
+      if (session) outcome = redactOutcome(outcome, [...session.values], true);
+      const ok = outcome['ok'] === true;
+      if (JSON.stringify(outcome).length > MAX_RESULT_BYTES) return fail('The result was too large to send back (over 20 MB).');
+      return { ok, result: outcome, error: ok ? null : String(outcome['error'] ?? 'The browser could not do that.').slice(0, 1900) };
+    }
     return fail(`unknown job kind ${kind}`);
   }
 
@@ -559,6 +572,7 @@ export class Executor {
       runnerVersion: this.runnerVersion ?? undefined,
       browserSessions: this.d.browser?.size() ?? 0,
       sandboxRunning: this.codeRunning,
+      senses: runnerHasSenses(this.runnerVersion),
     };
     this.d.publish(this.status);
   }

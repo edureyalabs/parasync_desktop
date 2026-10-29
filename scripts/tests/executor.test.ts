@@ -225,9 +225,10 @@ function fakeBrowser(over: Partial<BrowserApi> = {}) {
     size: () => open,
     open: async (id) => { calls.push(`open:${id}`); open += 1; return { ok: true }; },
     exec: async (id, request) => { calls.push(`exec:${id}:${request.code}`); return { ok: true, result: 'page-result', stdout: '', output_files: {} }; },
+    senses: async (id, op, body) => { calls.push(`${op}:${id}:${JSON.stringify(body)}`); return { ok: true, report: `PAGE ${op}`, output_files: {} }; },
     close: async (id) => { calls.push(`close:${id}`); open = Math.max(0, open - 1); },
     closeAll: async () => { calls.push('closeAll'); open = 0; },
-    check: async () => ({ ok: true }),
+    check: async (withSenses) => { calls.push(`check:${withSenses}`); return { ok: true }; },
     ...over,
   };
   return { api, calls };
@@ -283,6 +284,60 @@ test('browser jobs: open, exec and close drive the browser and are answered', as
   assert.equal(byId['e']?.ok, true);
   assert.equal((byId['e']?.result as { result?: string }).result, 'page-result');
   assert.equal(byId['c']?.ok, true);
+});
+
+test('look and act jobs go to the browser with the request exactly as the cloud sent it, and are answered', async () => {
+  const { api, calls } = fakeBrowser();
+  const t = setup({
+    version: '0.4.0', browser: api,
+    jobs: [
+      { id: 'l', agent_id: null, payload: { kind: 'browser_look', session_id: SID, query: 'search', allowed_hosts: ['erp.test'] }, timeout_seconds: 90 },
+      { id: 'a', agent_id: null, payload: { kind: 'browser_act', session_id: SID, action: 'click', target: 'k3x.1', settle_ms: 500 }, timeout_seconds: 150 },
+    ],
+  });
+  await enable(t.ex);
+  assert.ok(calls.includes(`look:${SID}:${JSON.stringify({ query: 'search', allowed_hosts: ['erp.test'] })}`));     // the job's own kind and session id are not part of the body
+  assert.ok(calls.includes(`act:${SID}:${JSON.stringify({ action: 'click', target: 'k3x.1', settle_ms: 500 })}`));
+  const byId = Object.fromEntries(t.finished.map((f) => [f.id, f]));
+  assert.equal(byId['l']?.ok, true);
+  assert.equal((byId['l']?.result as { report?: string }).report, 'PAGE look');
+  assert.equal(byId['a']?.ok, true);
+  assert.equal(t.ex.getStatus().senses, true);
+});
+
+test('look and act are refused, not run, while the Linux box is older than 0.4.0 or the session id is bad', async () => {
+  const { api, calls } = fakeBrowser();
+  const old = setup({ version: '0.3.1', browser: api, jobs: [{ id: 'l', agent_id: null, payload: { kind: 'browser_look', session_id: SID }, timeout_seconds: 90 }] });
+  await enable(old.ex);
+  assert.equal(old.finished[0]?.ok, false);
+  assert.match(String(old.finished[0]?.error), /has to update first/);
+  assert.equal(old.ex.getStatus().senses, false);
+  const bad = setup({ version: '0.4.0', browser: api, jobs: [{ id: 'l', agent_id: null, payload: { kind: 'browser_act', session_id: '../x', action: 'click' }, timeout_seconds: 90 }] });
+  await enable(bad.ex);
+  assert.equal(bad.finished[0]?.ok, false);
+  assert.ok(!calls.some((c) => c.startsWith('look:') || c.startsWith('act:')));
+});
+
+test('a failed action is a failed job with the browser\'s own words; the self-test asks for the page description only on an image that has it', async () => {
+  const failing = fakeBrowser({ senses: async () => ({ ok: false, error: 'no control named Save on the page', output_files: {} }) });
+  const t = setup({ version: '0.4.0', browser: failing.api, jobs: [{ id: 'a', agent_id: null, payload: { kind: 'browser_act', session_id: SID, action: 'click', target: 'Save' }, timeout_seconds: 90 }] });
+  await enable(t.ex);
+  assert.equal(t.finished[0]?.ok, false);
+  assert.match(String(t.finished[0]?.error), /no control named Save/);
+  assert.ok(failing.calls.includes('check:true'));
+  const older = fakeBrowser();
+  await enable(setup({ version: '0.3.1', browser: older.api }).ex);
+  assert.ok(older.calls.includes('check:false'));
+});
+
+test('what a logged-in browser shows is scrubbed of its login before a look or an act answer leaves the PC', async () => {
+  const { api } = fakeBrowser({ senses: async () => ({ ok: true, report: 'PAGE https://erp.test/home?sid=SESSIONTOKEN123 "Welcome hunter2hunter2"', output_files: { 'a.png': 'iVBORw0KGgo=' } }) });
+  const t = setup({ version: '0.4.0', browser: api, jobs: [{ id: 'a', agent_id: null, payload: { kind: 'browser_act', session_id: SID, action: 'click', target: 'Go' }, timeout_seconds: 90 }] });
+  (t.ex as unknown as { scrub: Map<string, { values: Set<string> }> }).scrub.set(SID, { values: new Set(['SESSIONTOKEN123', 'hunter2hunter2']) });
+  await enable(t.ex);
+  const out = t.finished[0]?.result as { report: string; output_files: Record<string, string> };
+  assert.ok(!out.report.includes('SESSIONTOKEN123') && !out.report.includes('hunter2hunter2'));
+  assert.equal(out.output_files['a.png'], 'iVBORw0KGgo=');                      // files are bytes: never rewritten
 });
 
 test('a browser job with a malformed session id or no code is refused, never run', async () => {
@@ -408,6 +463,26 @@ test('the host manager opens a browser, runs a script and closes it', async () =
   await hosts.close(SID);
   assert.equal(hosts.size(), 0);
   assert.deepEqual(host.killed, [SID]);
+});
+
+test('the host manager sends look and act with the cloud\'s own body and answers them', async () => {
+  const seen: Record<string, unknown>[] = [];
+  const host = fakeHost((line, reply) => {
+    const req = JSON.parse(line) as { id: string; op: string };
+    seen.push(req);
+    reply({ type: 'response', id: req.id, outcome: { ok: true, report: `PAGE ${req.op}`, output_files: {} } });
+  });
+  const hosts = new BrowserHosts(host.spawn);
+  await hosts.open(SID);
+  const look = await hosts.senses(SID, 'look', { query: 'x', id: 'sneaky', op: 'exec' });                       // the protocol's own fields cannot be set by a body
+  const act = await hosts.senses(SID, 'act', { action: 'click', target: 'k1.2' });
+  assert.equal(look['report'], 'PAGE look');
+  assert.equal(act['report'], 'PAGE act');
+  assert.equal(seen[0]?.['op'], 'look');
+  assert.notEqual(seen[0]?.['id'], 'sneaky');
+  assert.equal(seen[0]?.['query'], 'x');
+  assert.equal(seen[1]?.['action'], 'click');
+  assert.equal((await hosts.senses('99999999-0000-4000-8000-000000000000', 'look', {}))['session_gone'], true);
 });
 
 test('the host manager reports a session that does not exist as gone, and refuses bad ids and too many browsers', async () => {
