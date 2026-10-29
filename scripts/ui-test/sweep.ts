@@ -109,7 +109,7 @@ const USAGE = []; for (let i = 0; i < 40; i++) USAGE.push({ day: day(i), agent_i
   const results = [];
   const check = async (label, fn) => { const before = errors.length; try { await fn(); } catch (e) { errors.push(`STEP ${label}: ${String(e.message).split('\n').slice(0, 3).join(' | ')}`); await win.screenshot({ path: `${OUT}/FAIL_${label.replace(/\W+/g, '_')}.png` }).catch(() => undefined); } results.push(`${errors.length === before ? 'ok  ' : 'FAIL'} ${label}`); };
   const fresh = async () => { await win.reload(); await win.waitForTimeout(1600); };
-  const toSettings = async () => { await win.getByText('Inventory Agent').first().click(); await win.waitForTimeout(900); await win.mouse.click(490, 24); await win.waitForTimeout(900); };
+  const toSettings = async () => { await win.getByText('Inventory Agent').first().click(); await win.waitForTimeout(900); await win.mouse.click(490, 64); await win.waitForTimeout(900); };
   for (const label of ['Runsheet', 'Platform Tools', 'WhatsApp', 'Tool Builder', 'Instructions', 'Secrets', 'Database Integrations', 'MCP', 'Browser Access', 'Add Users', 'Workspace', 'Agent Profile']) {
     await check('tab ' + label, async () => { await fresh(); await toSettings(); await win.getByText(label, { exact: true }).first().click(); await shot('x_tab_' + label.replace(/\W+/g, '_')); });
   }

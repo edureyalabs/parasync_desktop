@@ -66,6 +66,8 @@ export interface RunnerStatus {
   browserNote?: string;
   /** Browsers open on this PC right now. */
   browserSessions?: number;
+  /** Code jobs (tool runs) running in the Linux box right now. */
+  sandboxRunning?: number;
 }
 
 /**

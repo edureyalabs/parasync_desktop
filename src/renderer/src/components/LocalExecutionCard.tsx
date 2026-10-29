@@ -2,6 +2,7 @@
 // Desktop-only. Lets the person run their agents' tool code on this PC (in a sealed Linux box) instead of the cloud.
 import { useRunner } from '~/hooks/useRunner';
 import { Button } from '~/components/ui';
+import { SetupGuide } from '~/components/SetupGuide';
 
 const LABEL: Record<string, string> = {
   off: 'Off',
@@ -16,7 +17,7 @@ const LABEL: Record<string, string> = {
 
 const BROWSER_LABEL = { unavailable: 'Needs a newer Linux box', checking: 'Checking…', ready: 'Ready', error: 'Needs attention' } as const;
 
-const row = { display: 'flex', justifyContent: 'space-between', gap: 24, padding: '11px 18px', borderBottom: '1px solid #E2DFD3', fontSize: 13.5 } as const;
+const row = { display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px 24px', padding: '11px 18px', borderBottom: '1px solid #E2DFD3', fontSize: 13.5 } as const;
 
 export function LocalExecutionCard() {
   const { status, setEnabled, install } = useRunner();
@@ -42,21 +43,19 @@ export function LocalExecutionCard() {
             </span>
           </div>
         ) : null}
+        <div style={row}><span style={{ color: '#9E9C8F' }}>Running now</span><span>{status.sandboxRunning ?? 0} tool run(s) · {status.browserSessions ?? 0} browser(s)</span></div>
         <div style={{ ...row, borderBottom: 'none' }}><span style={{ color: '#9E9C8F' }}>Tool runs here</span><span>{status.jobsRun ?? 0}</span></div>
       </div>
       {status.message ? <p style={{ margin: '10px 0 0', fontSize: 13, color: tone }}>{status.message}</p> : null}
       {status.browser === 'error' && status.browserNote ? <p style={{ margin: '8px 0 0', fontSize: 12.5, color: '#B4442A', lineHeight: 1.5 }}>Browser self-test: {status.browserNote}</p> : null}
-      {status.state === 'no-wsl' ? (
-        <p style={{ margin: '8px 0 0', fontSize: 12.5, color: '#67655A', lineHeight: 1.5 }}>
-          Open PowerShell as administrator, run <code>wsl --install</code>, restart the PC, then switch this on again.
-        </p>
-      ) : null}
+
       <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
         {status.enabled
           ? <Button variant="secondary" label="Turn off" onClick={() => setEnabled(false)} />
           : <Button label="Turn on" onClick={() => setEnabled(true)} />}
         {status.enabled && status.state === 'needs-install' ? <Button label="Install the Linux box" onClick={install} /> : null}
       </div>
+      <SetupGuide open={status.state === 'no-wsl' || status.state === 'needs-install' || status.state === 'error'} />
     </div>
   );
 }

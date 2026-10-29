@@ -9,7 +9,7 @@ import { useUpdates } from '~/hooks/useUpdates';
 import { useAuth } from '~/lib/auth';
 import { useRouter } from '~/shims/nextNavigation';
 
-const row = { display: 'flex', justifyContent: 'space-between', gap: 24, padding: '11px 18px', borderBottom: '1px solid #E2DFD3', fontSize: 13.5 } as const;
+const row = { display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px 24px', padding: '11px 18px', borderBottom: '1px solid #E2DFD3', fontSize: 13.5 } as const;
 
 export function AboutPage() {
   const { signOut } = useAuth();
@@ -27,8 +27,8 @@ export function AboutPage() {
     : 'You’re up to date';
 
   return (
-    <div style={{ flex: 1, background: '#F7F6F2', overflowY: 'auto', padding: '40px 24px' }}>
-      <div style={{ maxWidth: 520, margin: '0 auto' }}>
+    <div style={{ flex: 1, minHeight: 0, background: '#F7F6F2', overflowY: 'auto', padding: '32px 20px 72px' }}>
+      <div style={{ maxWidth: 560, margin: '0 auto' }}>
         <button onClick={() => router.push('/agents')} style={{ border: 'none', background: 'none', color: '#67655A', cursor: 'pointer', fontSize: 13, padding: 0, marginBottom: 14 }}>← Back</button>
         <h1 style={{ margin: '0 0 4px', fontFamily: "'Newsreader', Georgia, serif", fontSize: 28, fontWeight: 500, letterSpacing: '-0.01em' }}>Parasync for Windows</h1>
         <p style={{ margin: '0 0 22px', fontSize: 13, color: '#9E9C8F' }}>About this app.</p>
@@ -37,7 +37,7 @@ export function AboutPage() {
           <div style={row}><span style={{ color: '#9E9C8F' }}>Updates</span><span>{line}</span></div>
           <div style={{ ...row, borderBottom: 'none' }}><span style={{ color: '#9E9C8F' }}>Sign-in storage</span><span>{info ? (info.secureStorage ? 'Encrypted by Windows' : 'Memory only') : '—'}</span></div>
         </div>
-        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 16 }}>
           {status.state === 'ready'
             ? <Button label="Restart to update" onClick={install} />
             : <Button variant="secondary" label="Check for updates" onClick={check} loading={status.state === 'checking'} disabled={status.state === 'downloading'} />}

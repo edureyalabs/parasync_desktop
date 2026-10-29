@@ -1,15 +1,16 @@
 // src/renderer/src/App.tsx
-import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
 
 import { Button, Spinner } from '~/components/ui';
 import { UpdateBanner } from '~/components/UpdateBanner';
+import { TitleBar } from '~/components/TitleBar';
 import { VersionTag } from '~/components/VersionTag';
 import { AuthProvider, useAuth } from '~/lib/auth';
 import { ReplyNotifier } from '~/components/ReplyNotifier';
 import { AppRouter } from '~/router/AppRouter';
 import { AboutPage } from '~/views/AboutPage';
 import { AuthView } from '~/views/AuthView';
-import { usePathname } from '~/shims/nextNavigation';
+import { usePathname, useRouter } from '~/shims/nextNavigation';
 
 /** A crash anywhere shows a recovery card instead of a blank window. */
 class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -37,13 +38,33 @@ function ReplyNotifierHost() {
   return <ReplyNotifier currentAgentId={open} />;
 }
 
+/** The title bar sits outside the router; its status chip asks for the About page with an event, answered here. */
+function NavBridge() {
+  const router = useRouter();
+  useEffect(() => {
+    const go = (e: Event) => { const to = (e as CustomEvent<unknown>).detail; if (typeof to === 'string' && to.startsWith('/')) router.push(to); };
+    window.addEventListener('ps:navigate', go);
+    return () => window.removeEventListener('ps:navigate', go);
+  }, [router]);
+  return null;
+}
+
 function Gate() {
   const { session, loading } = useAuth();
-  if (loading) return <div style={{ height: '100%', background: '#F7F6F2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spinner size={28} /></div>;
-  if (!session) return <AuthView />;
-  // Keyed by the person so signing out and in as someone else never shows the previous person's screens.
+  // The window's header is drawn by the app (the Windows frame is hidden); everything else lives in the body below it.
+  const body = (() => {
+    if (loading) return <div style={{ height: '100%', background: '#F7F6F2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spinner size={28} /></div>;
+    if (!session) return <AuthView />;
+    // Keyed by the person so signing out and in as someone else never shows the previous person's screens.
+    return (
+      <AppRouter key={session.user.id} initial="/agents" desktopOnly={{ '/desktop': () => <AboutPage /> }} overlay={<><VersionTag /><ReplyNotifierHost /><NavBridge /></>} />
+    );
+  })();
   return (
-    <AppRouter key={session.user.id} initial="/agents" desktopOnly={{ '/desktop': () => <AboutPage /> }} overlay={<><VersionTag /><ReplyNotifierHost /></>} />
+    <>
+      <TitleBar signedIn={!loading && !!session} />
+      <div className="ps-body">{body}</div>
+    </>
   );
 }
 

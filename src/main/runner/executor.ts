@@ -75,6 +75,8 @@ export class Executor {
   private lastEnvCheckAt = 0;
   private lastJobAt = 0;
   private browserReady = false;
+  /** Code jobs running in the Linux box right now (browser calls are counted by the browser hosts instead). */
+  private codeRunning = 0;
   /** Browser sessions that were logged in with a saved login: everything their calls return is scrubbed of the login and of session tokens. */
   private readonly scrub = new Map<string, { values: Set<string> }>();
   private wslOk = false;
@@ -350,15 +352,20 @@ export class Executor {
     try {
       void this.d.cloud.touch(job.id).catch(() => undefined);
       const kind = job.payload && typeof job.payload === 'object' ? (job.payload as { kind?: unknown }).kind : undefined;
-      done = typeof kind === 'string' && kind.startsWith('browser_')
-        ? await this.runBrowserJob(kind, job.payload as Record<string, unknown>)
-        : await this.runCodeJob(job);
+      if (typeof kind === 'string' && kind.startsWith('browser_')) {
+        done = await this.runBrowserJob(kind, job.payload as Record<string, unknown>);
+      } else {
+        this.codeRunning += 1;
+        this.set({ ...this.status });
+        try { done = await this.runCodeJob(job); } finally { this.codeRunning -= 1; }
+      }
       this.jobsRun += 1;
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
       done = { ok: false, result: { ok: false, error }, error };
     } finally {
       clearInterval(keepAlive);
+      this.set({ ...this.status }); // the counts in the header: a browser may have opened or closed, a code job has ended
     }
     try {
       await this.d.cloud.finish(job.id, done.ok, done.result, done.error);
@@ -551,6 +558,7 @@ export class Executor {
       deviceName: this.d.deviceName,
       runnerVersion: this.runnerVersion ?? undefined,
       browserSessions: this.d.browser?.size() ?? 0,
+      sandboxRunning: this.codeRunning,
     };
     this.d.publish(this.status);
   }

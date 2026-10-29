@@ -75,6 +75,8 @@ const publicOut = join(outDir, 'public');
 mkdirSync(join(publicOut, 'icons'), { recursive: true });
 cpSync(join(webDir, 'public', 'logo.png'), join(publicOut, 'logo.png'));
 for (const f of readdirSync(join(webDir, 'public', 'icons'))) cpSync(join(webDir, 'public', 'icons', f), join(publicOut, 'icons', f));
+// The Parasync Agents display font (the landing page's wordmark), used by the desktop's title bar.
+if (existsSync(join(webDir, 'public', 'fonts'))) cpSync(join(webDir, 'public', 'fonts'), join(publicOut, 'fonts'), { recursive: true });
 
 // The desktop swaps the web's payment pop-ups for "continue on the web" ones (src/renderer/src/shims/subscribeAgentModal.tsx), and that
 // copy carries the web's monthly price table. Warn if the web has changed it.

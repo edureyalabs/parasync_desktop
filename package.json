@@ -1,7 +1,7 @@
 {
   "name": "parasync-desktop",
   "productName": "Parasync",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Parasync for Windows",
   "author": "Parasync Technologies Pvt Ltd",
   "homepage": "https://github.com/edureyalabs/parasync_desktop",
@@ -11,7 +11,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "sync-web": "node --no-warnings scripts/sync-web.ts",
-    "test": "rolldown scripts/tests/executor.test.ts --format esm --platform node --file out/test/executor.test.mjs && rolldown scripts/tests/vault.test.ts --format esm --platform node --file out/test/vault.test.mjs && rolldown scripts/tests/localcopy.test.ts --format esm --platform node --file out/test/localcopy.test.mjs && node --no-warnings --test out/test/executor.test.mjs out/test/vault.test.mjs out/test/localcopy.test.mjs",
+    "test": "rolldown scripts/tests/executor.test.ts --format esm --platform node --file out/test/executor.test.mjs && rolldown scripts/tests/vault.test.ts --format esm --platform node --file out/test/vault.test.mjs && rolldown scripts/tests/localcopy.test.ts --format esm --platform node --file out/test/localcopy.test.mjs && rolldown scripts/tests/zoom.test.ts --format esm --platform node --file out/test/zoom.test.mjs && node --no-warnings --test out/test/executor.test.mjs out/test/vault.test.mjs out/test/localcopy.test.mjs out/test/zoom.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.web-mirror.json",
     "dist": "npm run build && electron-builder --win --publish never",
     "release:patch": "npm version patch -m \"Release %s\"",

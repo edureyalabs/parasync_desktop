@@ -3,6 +3,7 @@ import { app, BrowserWindow, ipcMain, Menu, net, protocol, session, shell, type 
 import { join, normalize, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { zoomFor } from '../shared/zoom';
 import { APP_CONFIG } from '../shared/config';
 import { IPC, type AppInfo } from '../shared/ipc';
 import { encryptionAvailable, getItem, removeItem, setItem } from './secureStore';
@@ -76,11 +77,14 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
-    minWidth: 960,
-    minHeight: 600,
+    minWidth: 720,
+    minHeight: 520,
     show: false,
     backgroundColor: '#29281F',
     title: 'Parasync',
+    // The header is drawn by the app (components/TitleBar.tsx); Windows draws only the minimise / maximise / close buttons over its right end.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#29281F', symbolColor: '#F7F6F2', height: 40 },
     icon: join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -94,7 +98,18 @@ function createWindow(): void {
     },
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  // One zoom for the whole page follows the window's width, so every screen (the web's own included) fits small windows and uses large ones:
+  // a narrow window shows everything a little smaller instead of cutting it off.
+  const fit = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const zoom = zoomFor(mainWindow.getContentSize()[0] ?? 1280);
+    mainWindow.webContents.setZoomFactor(zoom);
+    // The header must stay as tall as the native window buttons Windows draws over it (40 px of the real window), whatever the page zoom is.
+    void mainWindow.webContents.executeJavaScript(`document.documentElement.style.setProperty('--ps-zoom', '${zoom}')`).catch(() => undefined);
+  };
+  mainWindow.webContents.on('did-finish-load', fit);
+  mainWindow.on('resize', fit);
+  mainWindow.once('ready-to-show', () => { fit(); mainWindow?.show(); });
   mainWindow.on('closed', () => {
     mainWindow = null;
     rendererReady = false;
