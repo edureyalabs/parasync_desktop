@@ -55,7 +55,8 @@ export interface ExecutorDeps {
   log(message: string): void;
 }
 
-const MAX_RESULT_BYTES = 20 * 1024 * 1024;
+// One call may return up to 25 MB of output files (the cloud's own cap); base64 makes that 4/3 as big on the wire, plus room for the text.
+const MAX_RESULT_BYTES = Math.ceil((25 * 1024 * 1024 * 4) / 3) + 2 * 1024 * 1024;
 const ENV_CHECK_EVERY_MS = 30_000;
 const SESSION_ID = /^[0-9a-fA-F-]{8,64}$/;
 
@@ -398,7 +399,7 @@ export class Executor {
     if (JSON.stringify(result).length > MAX_RESULT_BYTES) {
       ok = false;
       result = null;
-      error = 'The result was too large to send back (over 20 MB).';
+      error = 'The result was too large to send back (over 25 MB of files).';
     }
     return { ok, result, error };
   }
@@ -514,7 +515,7 @@ export class Executor {
       }
       if (session || needles.length > 0) outcome = redactOutcome(outcome, [...(session?.values ?? []), ...needles], session !== undefined);
       const ok = outcome['ok'] === true;
-      if (JSON.stringify(outcome).length > MAX_RESULT_BYTES) return fail('The result was too large to send back (over 20 MB).');
+      if (JSON.stringify(outcome).length > MAX_RESULT_BYTES) return fail('The result was too large to send back (over 25 MB of files).');
       return { ok, result: outcome, error: ok ? null : String(outcome['error'] ?? 'The script failed.').slice(0, 1900) };
     }
     if (kind === 'browser_look' || kind === 'browser_act') {
@@ -525,7 +526,7 @@ export class Executor {
       const session = this.scrub.get(sessionId);
       if (session) outcome = redactOutcome(outcome, [...session.values], true);
       const ok = outcome['ok'] === true;
-      if (JSON.stringify(outcome).length > MAX_RESULT_BYTES) return fail('The result was too large to send back (over 20 MB).');
+      if (JSON.stringify(outcome).length > MAX_RESULT_BYTES) return fail('The result was too large to send back (over 25 MB of files).');
       return { ok, result: outcome, error: ok ? null : String(outcome['error'] ?? 'The browser could not do that.').slice(0, 1900) };
     }
     return fail(`unknown job kind ${kind}`);

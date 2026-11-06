@@ -28,12 +28,16 @@ export interface DevicePatch {
   held_secrets?: HeldMap;
 }
 
+// A call may carry (and return) up to ~35 MB of base64 files, so these two transfers get room on a slow connection; everything else stays at 20 s.
+const BIG_TRANSFER_MS = 180_000;
+
 export class SignedOutError extends Error {}
 
 export interface Cloud {
   /** Updates the device row; creates it on first use. */
   saveDevice(id: string, userId: string, patch: DevicePatch): Promise<void>;
-  queuedJobs(deviceId: string): Promise<JobRow[]>;
+  /** Ids only: a big payload is not downloaded on every poll, only by the claim that wins the job. */
+  queuedJobs(deviceId: string): Promise<Array<Pick<JobRow, 'id'>>>;
   /** The job when this app won the claim, null when someone else did or it was cancelled. */
   claim(jobId: string): Promise<JobRow | null>;
   touch(jobId: string): Promise<boolean>;
@@ -41,7 +45,7 @@ export interface Cloud {
 }
 
 export function createCloud(baseUrl: string, apiKey: string, getToken: () => string | null): Cloud {
-  async function call(path: string, init: RequestInit & { prefer?: string } = {}): Promise<unknown> {
+  async function call(path: string, init: RequestInit & { prefer?: string; timeoutMs?: number } = {}): Promise<unknown> {
     const token = getToken();
     if (!token) throw new SignedOutError('not signed in');
     const res = await fetch(`${baseUrl}/rest/v1/${path}`, {
@@ -52,7 +56,7 @@ export function createCloud(baseUrl: string, apiKey: string, getToken: () => str
         'content-type': 'application/json',
         ...(init.prefer ? { prefer: init.prefer } : {}),
       },
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(init.timeoutMs ?? 20_000),
     });
     if (res.status === 401) throw new SignedOutError('session expired');
     if (!res.ok) throw new Error(`Parasync cloud answered ${res.status}`);
@@ -71,18 +75,18 @@ export function createCloud(baseUrl: string, apiKey: string, getToken: () => str
       });
     },
     async queuedJobs(deviceId) {
-      const rows = await call(`desktop_jobs?device_id=eq.${encodeURIComponent(deviceId)}&status=eq.queued&select=id,agent_id,payload,timeout_seconds&order=created_at.asc&limit=5`);
-      return Array.isArray(rows) ? (rows as JobRow[]) : [];
+      const rows = await call(`desktop_jobs?device_id=eq.${encodeURIComponent(deviceId)}&status=eq.queued&select=id,agent_id,timeout_seconds&order=created_at.asc&limit=5`);
+      return Array.isArray(rows) ? (rows as Array<Pick<JobRow, 'id'>>) : [];
     },
     async claim(jobId) {
-      const row = (await call('rpc/claim_desktop_job', { method: 'POST', body: JSON.stringify({ p_job_id: jobId }) })) as Partial<JobRow> | null;
+      const row = (await call('rpc/claim_desktop_job', { method: 'POST', body: JSON.stringify({ p_job_id: jobId }), timeoutMs: BIG_TRANSFER_MS })) as Partial<JobRow> | null;
       return row && typeof row.id === 'string' ? (row as JobRow) : null;
     },
     async touch(jobId) {
       return (await call('rpc/touch_desktop_job', { method: 'POST', body: JSON.stringify({ p_job_id: jobId }) })) === true;
     },
     async finish(jobId, ok, result, error) {
-      return (await call('rpc/finish_desktop_job', { method: 'POST', body: JSON.stringify({ p_job_id: jobId, p_ok: ok, p_result: result, p_error: error }) })) === true;
+      return (await call('rpc/finish_desktop_job', { method: 'POST', body: JSON.stringify({ p_job_id: jobId, p_ok: ok, p_result: result, p_error: error }), timeoutMs: BIG_TRANSFER_MS })) === true;
     },
   };
 }
